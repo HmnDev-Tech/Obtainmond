@@ -1,40 +1,46 @@
-// Shared signing configuration for Obtainmond
-// Signs BOTH debug and release variants with the exact same key so users can
-// install debug over release (and vice-versa) without ever uninstalling.
+def ksFile = rootProject.file('signing.properties')
+def props = new Properties()
 
-android {
-    signingConfigs {
-        sign
-    }
-    buildTypes {
-        debug {
-            signingConfig signingConfigs.sign
+if (ksFile.canRead()) {
+    props.load(new FileInputStream(ksFile))
+
+    def ksPath = props['KEYSTORE_FILE']
+    File targetKeystore = null
+    if (ksPath != null && !ksPath.isBlank()) {
+        def f1 = new File(ksPath)
+        if (f1.isAbsolute() && f1.exists()) {
+            targetKeystore = f1
+        } else {
+            def fRoot = rootProject.file(ksPath)
+            if (fRoot.exists()) {
+                targetKeystore = fRoot
+            } else {
+                def fLocal = file(ksPath)
+                if (fLocal.exists()) {
+                    targetKeystore = fLocal
+                } else {
+                    targetKeystore = fRoot
+                }
+            }
         }
-        release {
-            signingConfig signingConfigs.sign
-        }
     }
-}
 
-Properties props = new Properties()
-def propFile = rootProject.file('signing.properties')
+    def keyAlias = props['KEY_ALIAS'] ?: props['KEYSTORE_ALIAS']
+    def keyPass = props['KEY_PASSWORD'] ?: props['KEYSTORE_ALIAS_PASSWORD']
+    def storePass = props['KEYSTORE_PASSWORD'] ?: props['SIGNING_STORE_PASSWORD']
 
-if (propFile.canRead()) {
-    props.load(new FileInputStream(propFile))
-
-    if (props != null &&
-        props.containsKey('KEYSTORE_FILE') &&
-        props.containsKey('KEYSTORE_PASSWORD') &&
-        props.containsKey('KEY_ALIAS') &&
-        props.containsKey('KEY_PASSWORD')) {
-
-        android.signingConfigs.sign.storeFile = rootProject.file(props['KEYSTORE_FILE'])
-        android.signingConfigs.sign.storePassword = props['KEYSTORE_PASSWORD']
-        android.signingConfigs.sign.keyAlias = props['KEY_ALIAS']
-        android.signingConfigs.sign.keyPassword = props['KEY_PASSWORD']
+    if (targetKeystore != null && targetKeystore.exists() && keyAlias != null && storePass != null) {
+        android.signingConfigs.sign.storeFile targetKeystore
+        android.signingConfigs.sign.storePassword storePass
+        android.signingConfigs.sign.keyAlias keyAlias
+        android.signingConfigs.sign.keyPassword (keyPass ?: storePass)
     } else {
         android.signingConfigs.sign.initWith(android.signingConfigs.debug)
     }
 } else {
     android.signingConfigs.sign.initWith(android.signingConfigs.debug)
 }
+
+android.signingConfigs.sign.enableV1Signing = true
+android.signingConfigs.sign.enableV2Signing = true
+android.signingConfigs.sign.enableV3Signing = true
