@@ -1,0 +1,39 @@
+plugins {
+    id("idea")
+}
+
+idea.module {
+    excludeDirs += file('out')
+}
+
+subprojects {
+    plugins.withId("com.android.base") {
+        android {
+            compileSdk = 37
+            buildToolsVersion = "37.0.0"
+            ndkVersion = "29.0.14206865"
+            defaultConfig {
+                minSdk = 26
+                targetSdk = 37
+            }
+            compileOptions {
+                sourceCompatibility = JavaVersion.VERSION_21
+                targetCompatibility = JavaVersion.VERSION_21
+            }
+        }
+    }
+    tasks.withType(JavaCompile).configureEach {
+        options.encoding = 'UTF-8'
+    }
+}
+
+def gitCommitCount = 100
+try {
+    def count = 'git rev-list --count HEAD'.execute([], project.rootDir).text.trim()
+    if (!count.isEmpty()) gitCommitCount = count.toInteger()
+} catch (Exception ignored) {}
+
+ext {
+    versionCode = gitCommitCount
+    versionName = "2.0.0-rust"
+}

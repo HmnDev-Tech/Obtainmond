@@ -1,0 +1,10 @@
+-keepattributes Signature,InnerClasses,EnclosingMethod,Annotation
+-keep class io.obtainmond.rust.ObtainmondNative { *; }
+-keep class io.obtainmond.data.model.** { *; }
+-keep class com.hamondev.shevery.api.** { *; }
+-keep class moe.shizuku.api.** { *; }
+-keep class rikka.shizuku.** { *; }
+-dontwarn rikka.shizuku.**
+-dontwarn com.hamondev.shevery.api.**
+-dontwarn okhttp3.**
+-dontwarn okio.**

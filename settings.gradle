@@ -1,0 +1,32 @@
+pluginManagement {
+    repositories {
+        google()
+        mavenLocal()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+    plugins {
+        id("com.android.application") version "9.4.0-alpha07"
+        id("com.android.library") version "9.4.0-alpha07"
+        id("org.jetbrains.kotlin.plugin.compose") version "2.4.20-Beta2"
+        id("org.jetbrains.kotlin.plugin.serialization") version "2.4.20-Beta2"
+    }
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenLocal()
+        mavenCentral()
+        maven {
+            url = uri("https://raw.githubusercontent.com/HmnDev-Tech/Shevery-API/maven")
+        }
+        maven {
+            url = uri("https://jitpack.io")
+        }
+    }
+}
+
+rootProject.name = "Obtainmond"
+include(":app")

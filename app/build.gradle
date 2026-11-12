@@ -1,0 +1,140 @@
+plugins {
+    id('com.android.application')
+    id('org.jetbrains.kotlin.plugin.compose')
+    id('org.jetbrains.kotlin.plugin.serialization')
+}
+
+android {
+    namespace 'io.obtainmond'
+    defaultConfig {
+        applicationId "io.obtainmond"
+        versionCode rootProject.ext.versionCode
+        versionName rootProject.ext.versionName
+        ndk {
+            abiFilters 'x86', 'x86_64', 'armeabi-v7a', 'arm64-v8a'
+        }
+    }
+    buildFeatures {
+        buildConfig true
+        compose true
+    }
+    signingConfigs {
+        sign
+    }
+    buildTypes {
+        // Both debug and release share applicationId "io.obtainmond" and signingConfigs.sign
+        // so switching between debug and release APKs never requires uninstalling.
+        debug {
+            signingConfig signingConfigs.sign
+            debuggable true
+        }
+        release {
+            minifyEnabled true
+            shrinkResources true
+            signingConfig signingConfigs.sign
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging true
+        }
+        resources {
+            excludes += ['/META-INF/{AL2.0,LGPL2.1}', '/META-INF/versions/**']
+        }
+    }
+    applicationVariants.all { variant ->
+        variant.outputs.all {
+            outputFileName = "obtainmond-v${variant.versionName}-${variant.buildType.name}.apk"
+        }
+    }
+}
+
+apply from: rootProject.file('signing.gradle')
+
+def rustTargets = [
+    'arm64-v8a'  : 'aarch64-linux-android',
+    'armeabi-v7a': 'armv7-linux-androideabi',
+    'x86'        : 'i686-linux-android',
+    'x86_64'     : 'x86_64-linux-android'
+]
+
+tasks.register('compileRustCore') {
+    description = 'Builds native/obtainmond-core Rust library for all Android ABIs via cargo-ndk'
+    def jniOutDir = file("$projectDir/src/main/jniLibs")
+    inputs.dir(rootProject.file("native"))
+    outputs.dir(jniOutDir)
+
+    doLast {
+        def ndkDir = android.ndkDirectory
+        def cargoBin = new File(System.getProperty("user.home"), ".cargo/bin/cargo")
+        def cargoCmd = cargoBin.exists() ? cargoBin.absolutePath : "cargo"
+
+        // If CI already prebuilt libobtainmond_core.so for all ABIs, skip re-running
+        def allExist = rustTargets.keySet().every { abi ->
+            new File(jniOutDir, "$abi/libobtainmond_core.so").exists()
+        }
+        if (allExist && System.getenv("SKIP_GRADLE_RUST_BUILD") == "true") {
+            logger.lifecycle("Prebuilt Rust libraries found in jniLibs; skipping Gradle cargo-ndk run.")
+            return
+        }
+
+        rustTargets.each { abi, target ->
+            def abiOut = new File(jniOutDir, abi)
+            abiOut.mkdirs()
+
+            logger.lifecycle("Building Rust obtainmond-core for $abi ($target)...")
+            def pb = new ProcessBuilder(
+                cargoCmd, "ndk",
+                "-t", abi,
+                "--platform", "26",
+                "-o", jniOutDir.absolutePath,
+                "build", "--release", "-p", "obtainmond-core"
+            )
+            pb.directory(rootProject.file("native"))
+            pb.environment().put("ANDROID_NDK_HOME", ndkDir.absolutePath)
+            pb.redirectErrorStream(true)
+            def proc = pb.start()
+            proc.inputStream.eachLine { line -> logger.lifecycle(line) }
+            def code = proc.waitFor()
+            if (code != 0) {
+                throw new GradleException("cargo ndk build failed for $abi with exit code $code")
+            }
+        }
+    }
+}
+
+preBuild.dependsOn(compileRustCore)
+
+dependencies {
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.1'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.1'
+    implementation 'org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.0'
+
+    // Shevery-API (v14.6.4) — includes both com.hamondev.shevery.api.* and rikka.shizuku.* (Shizuku & ShizukuProvider)
+    implementation 'com.hamondev.shevery.api:api:14.6.4'
+    implementation 'com.hamondev.shevery.api:provider:14.6.4'
+
+    // AndroidX Core & Lifecycle & WorkManager
+    implementation 'androidx.core:core-ktx:1.16.0'
+    implementation 'androidx.activity:activity-ktx:1.10.1'
+    implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.8.7'
+    implementation 'androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.7'
+    implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7'
+    implementation 'androidx.work:work-runtime-ktx:2.10.0'
+    implementation 'com.google.android.material:material:1.14.0-alpha09'
+
+    // Jetpack Compose + Material 3 Expressive (1.5.0-alpha16)
+    implementation platform('androidx.compose:compose-bom:2025.02.00')
+    implementation 'androidx.activity:activity-compose:1.10.1'
+    implementation 'androidx.compose.ui:ui'
+    implementation 'androidx.compose.ui:ui-graphics'
+    implementation 'androidx.compose.ui:ui-tooling-preview'
+    implementation 'androidx.compose.foundation:foundation'
+    implementation 'androidx.compose.material3:material3:1.5.0-alpha16'
+    implementation 'androidx.compose.material:material-icons-extended'
+    debugImplementation 'androidx.compose.ui:ui-tooling'
+
+    // HTTP client for downloading APKs & API requests
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+}

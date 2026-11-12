@@ -1,0 +1,17 @@
+[package]
+name = "obtainmond-core"
+version = "2.0.0"
+edition = "2021"
+description = "Rust core engine for Obtainmond: version normalization, smart ABI APK selection, release API parsers, and APK ZIP/SHA-256 integrity verification"
+
+[lib]
+name = "obtainmond_core"
+crate-type = ["cdylib"]
+
+[dependencies]
+jni = "0.21"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+hex = "0.4"
+regex = { version = "1.11", default-features = false, features = ["std", "perf", "unicode-perl"] }
