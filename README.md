@@ -2,9 +2,6 @@
 
 [![APK Build](https://github.com/HmnDev-Tech/Obtainmond/actions/workflows/apk-build.yml/badge.svg)](https://github.com/HmnDev-Tech/Obtainmond/actions/workflows/apk-build.yml)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Shevery-API](https://img.shields.io/badge/Shevery--API-v14.6.4-8A2BE2.svg)](https://github.com/HmnDev-Tech/Shevery-API)
-[![Rust Core](https://img.shields.io/badge/Rust-Core%20Engine-DEA584.svg?logo=rust)](native/obtainmond-core)
-[![Compose M3 Expressive](https://img.shields.io/badge/UI-Material%203%20Expressive-6750A4.svg)](app/src/main/java/io/obtainmond/ui)
 
 **Get Android app updates straight from the source — fully automated, zero-touch, and blazing fast.**
 
