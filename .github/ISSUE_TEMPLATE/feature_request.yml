@@ -1,52 +1,41 @@
-name: ✨ Feature request
-description: Suggest a new source, setting, or any other feature.
-labels:
-  - enhancement
-  - to check
+name: Feature Request
+description: Suggest an idea, enhancement, or new Lab feature for Obtainmond
+title: "[Feature]: "
+labels: ["enhancement"]
 body:
   - type: markdown
     attributes:
       value: |
-        ## Prerequisites
-
-        - Please ensure your request is not part of an [existing issue](https://github.com/ImranR98/Obtainium/issues?q=is%3Aissue%20label%3Aenhancement).
-        - Please ensure you have checked the [Obtainium Wiki](https://wiki.obtainium.imranr.dev/).
-
-         >[!NOTE]
-         > For new sources, please ensure:
-        >1. It is not already possible to use the HTML source for your purposes.
-        >
-        >2. It must be possible to extract the following details from the Source in a reliable way:
-        >
-           >	- The app version (or any release-specific identifier — a "pseudo-version") for the latest release.
-           >	- One or more APK URL(s) for the latest release.
-           >	- Above details for previous releases (optional).
-        >
-        >If you're not sure about 1 or 2, open a discussion item instead.
-        >
-        >Note that the web scraper cannot deal with JavaScript-enabled content.
-
+        Have an idea to make Obtainmond better? We'd love to hear it!
   - type: textarea
-    id: feature
+    id: problem
     attributes:
-      label: Describe the feature
-      description: |
-        A clear and concise description of what you want to happen.
-
+      label: Problem or Motivation
+      description: What limitation or problem does this feature solve?
     validations:
       required: true
-
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: Describe how you envision this feature working.
+    validations:
+      required: true
+  - type: dropdown
+    id: category
+    attributes:
+      label: Feature Category
+      options:
+        - "Rust Core Engine (Version / ABI Selector / Source Parser)"
+        - "Zero-Touch Background Auto-Update"
+        - "Shevery-API / Shizuku Privileged Operations"
+        - "Obtainmond Labs (Experimental / Power-User Feature)"
+        - "Material 3 Expressive UI & Animations"
+        - "Other"
+    validations:
+      required: true
   - type: textarea
     id: alternatives
     attributes:
-      label: Describe alternatives you've considered
-      description: |
-        A clear and concise description of any alternative solutions or features you've considered.
-
-        Note that app-specific sources are less likely to be added. In those cases, see if the HTML source will work for you. If not, see if a generally-applicable enhancement to the HTML source would work, and suggest that instead.
-
-  - type: textarea
-    id: additional_context
-    attributes:
-      label: Additional context
-      description: Add any other context or screenshots about the feature request here.
+      label: Alternatives Considered
+      description: Any alternative solutions or workarounds you have considered.

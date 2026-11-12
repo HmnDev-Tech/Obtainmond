@@ -1,1 +1,8 @@
 blank_issues_enabled: false
+contact_links:
+  - name: GitHub Discussions
+    url: https://github.com/HmnDev-Tech/Obtainmond/discussions
+    about: Ask questions, share crowdsourced configurations, or discuss Obtainmond with the community.
+  - name: Shevery-API Documentation
+    url: https://github.com/HmnDev-Tech/Shevery-API
+    about: Learn more about Shevery-API fast binder IPC and capabilities.

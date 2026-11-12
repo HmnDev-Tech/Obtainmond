@@ -66,11 +66,16 @@ tasks.register('compileRustCore') {
     outputs.dir(jniOutDir)
 
     doLast {
-        def ndkDir = android.ndkDirectory
+        def ndkPath = System.getenv("ANDROID_NDK_HOME")
+        if (ndkPath == null || ndkPath.isBlank()) {
+            try {
+                ndkPath = android.ndkDirectory?.absolutePath
+            } catch (Exception ignored) {}
+        }
         def cargoBin = new File(System.getProperty("user.home"), ".cargo/bin/cargo")
         def cargoCmd = cargoBin.exists() ? cargoBin.absolutePath : "cargo"
 
-        // If CI already prebuilt libobtainmond_core.so for all ABIs, skip re-running
+        // If prebuilt libobtainmond_core.so exists for all ABIs, skip re-running
         def allExist = rustTargets.keySet().every { abi ->
             new File(jniOutDir, "$abi/libobtainmond_core.so").exists()
         }
@@ -92,7 +97,9 @@ tasks.register('compileRustCore') {
                 "build", "--release", "-p", "obtainmond-core"
             )
             pb.directory(rootProject.file("native"))
-            pb.environment().put("ANDROID_NDK_HOME", ndkDir.absolutePath)
+            if (ndkPath != null && !ndkPath.isBlank()) {
+                pb.environment().put("ANDROID_NDK_HOME", ndkPath)
+            }
             pb.redirectErrorStream(true)
             def proc = pb.start()
             proc.inputStream.eachLine { line -> logger.lifecycle(line) }
@@ -111,18 +118,18 @@ dependencies {
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.1'
     implementation 'org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.0'
 
-    // Shevery-API (v14.6.4) — includes both com.hamondev.shevery.api.* and rikka.shizuku.* (Shizuku & ShizukuProvider)
+    // Shevery-API (v14.6.4) — includes both com.hamondev.shevery.api.* and rikka.shizuku.*
     implementation 'com.hamondev.shevery.api:api:14.6.4'
     implementation 'com.hamondev.shevery.api:provider:14.6.4'
 
     // AndroidX Core & Lifecycle & WorkManager
-    implementation 'androidx.core:core-ktx:1.16.0'
+    implementation 'androidx.core:core-ktx:1.15.0'
     implementation 'androidx.activity:activity-ktx:1.10.1'
     implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.8.7'
     implementation 'androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.7'
     implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7'
     implementation 'androidx.work:work-runtime-ktx:2.10.0'
-    implementation 'com.google.android.material:material:1.14.0-alpha09'
+    implementation 'com.google.android.material:material:1.12.0'
 
     // Jetpack Compose + Material 3 Expressive (1.5.0-alpha16)
     implementation platform('androidx.compose:compose-bom:2025.02.00')
