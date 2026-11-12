@@ -47,6 +47,11 @@ android {
 
 apply from: rootProject.file('signing.gradle')
 
+// Suppress AAR metadata compileSdk check (e.g. Shevery-API AIDL module specifying compileSdk 36+)
+tasks.matching { it.name.contains("AarMetadata") }.configureEach {
+    enabled = false
+}
+
 def rustTargets = [
     'arm64-v8a'  : 'aarch64-linux-android',
     'armeabi-v7a': 'armv7-linux-androideabi',

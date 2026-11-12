@@ -29,10 +29,9 @@ jobs:
           java-version: '21'
           cache: 'gradle'
 
-      - name: Install Android Platform 37 & Accept Licenses
+      - name: Accept Android SDK licenses
         run: |
           yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null 2>&1 || true
-          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37" "build-tools;37.0.0"
 
       - name: Detect or Install Android NDK
         run: |
