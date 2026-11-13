@@ -1,11 +1,23 @@
 package io.obtainmond.ui.compose
 
 import android.os.Build
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -35,6 +47,7 @@ import androidx.compose.material3.MaterialExpressiveTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MotionScheme
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
@@ -42,10 +55,14 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -55,6 +72,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
 
 data class ExpressiveNavDestination(
     val label: String,
@@ -186,6 +204,15 @@ fun ExpressiveFloatingNavigationBar(
                         label = "navPillTint"
                     )
 
+                    val iconScale by animateFloatAsState(
+                        targetValue = if (selected) 1.12f else 1.0f,
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                            stiffness = Spring.StiffnessMediumLow
+                        ),
+                        label = "navIconScale"
+                    )
+
                     Row(
                         modifier = Modifier
                             .graphicsLayer {
@@ -207,18 +234,39 @@ fun ExpressiveFloatingNavigationBar(
                             imageVector = if (selected) dest.selectedIcon else dest.unselectedIcon,
                             contentDescription = dest.label,
                             tint = contentTint,
-                            modifier = Modifier.size(22.dp)
+                            modifier = Modifier
+                                .size(22.dp)
+                                .graphicsLayer {
+                                    scaleX = iconScale
+                                    scaleY = iconScale
+                                }
                         )
-                        if (selected) {
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                text = dest.label,
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.SemiBold,
-                                color = contentTint,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
+                        AnimatedVisibility(
+                            visible = selected,
+                            enter = expandHorizontally(
+                                animationSpec = spring(
+                                    dampingRatio = Spring.DampingRatioLowBouncy,
+                                    stiffness = Spring.StiffnessMediumLow
+                                )
+                            ) + fadeIn(tween(180)),
+                            exit = shrinkHorizontally(
+                                animationSpec = spring(
+                                    dampingRatio = Spring.DampingRatioNoBouncy,
+                                    stiffness = Spring.StiffnessMedium
+                                )
+                            ) + fadeOut(tween(120))
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    text = dest.label,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = contentTint,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
                         }
                         if (dest.badgeCount > 0) {
                             Spacer(Modifier.width(6.dp))
@@ -246,29 +294,52 @@ fun ExpressiveFloatingNavigationBar(
 
 @Composable
 fun ExpressiveCard(
+    modifier: Modifier = Modifier,
     containerColor: Color = MaterialTheme.colorScheme.surfaceContainerLow,
     contentColor: Color = MaterialTheme.colorScheme.onSurface,
     topCorner: Dp = 28.dp,
     bottomCorner: Dp = 28.dp,
+    contentPadding: Dp = 18.dp,
     onClick: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(
-        targetValue = if (isPressed && onClick != null) 0.97f else 1f,
+        targetValue = if (isPressed && onClick != null) 0.975f else 1f,
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioMediumBouncy,
             stiffness = Spring.StiffnessMediumLow
         ),
         label = "cardScale"
     )
+    val animatedBg by animateColorAsState(
+        targetValue = containerColor,
+        animationSpec = tween(260),
+        label = "cardBg"
+    )
+    val animatedTop by animateDpAsState(
+        targetValue = topCorner,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "cardTopCorner"
+    )
+    val animatedBottom by animateDpAsState(
+        targetValue = bottomCorner,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "cardBottomCorner"
+    )
 
     val shape = RoundedCornerShape(
-        topStart = topCorner,
-        topEnd = topCorner,
-        bottomStart = bottomCorner,
-        bottomEnd = bottomCorner
+        topStart = animatedTop,
+        topEnd = animatedTop,
+        bottomStart = animatedBottom,
+        bottomEnd = animatedBottom
     )
 
     Card(
@@ -277,20 +348,124 @@ fun ExpressiveCard(
         shape = shape,
         interactionSource = interactionSource,
         colors = CardDefaults.cardColors(
-            containerColor = containerColor,
+            containerColor = animatedBg,
             contentColor = contentColor,
-            disabledContainerColor = containerColor,
+            disabledContainerColor = animatedBg,
             disabledContentColor = contentColor
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
             }
+            .animateContentSize(
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioLowBouncy,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            )
     ) {
-        Column(modifier = Modifier.padding(20.dp), content = content)
+        Column(modifier = Modifier.padding(contentPadding), content = content)
+    }
+}
+
+@Composable
+fun ExpressiveStaggeredEntrance(
+    index: Int,
+    content: @Composable () -> Unit
+) {
+    var visible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        delay((index.coerceAtMost(8) * 35L))
+        visible = true
+    }
+    val alpha by animateFloatAsState(
+        targetValue = if (visible) 1f else 0f,
+        animationSpec = tween(260, easing = FastOutSlowInEasing),
+        label = "staggerAlpha"
+    )
+    val translationY by animateFloatAsState(
+        targetValue = if (visible) 0f else 28f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioLowBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "staggerY"
+    )
+    Box(
+        modifier = Modifier
+            .alpha(alpha)
+            .graphicsLayer { this.translationY = translationY }
+    ) {
+        content()
+    }
+}
+
+@Composable
+fun ExpressivePulsingDot(
+    color: Color,
+    active: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "pulseDot")
+    val pulse by infiniteTransition.animateFloat(
+        initialValue = 0.75f,
+        targetValue = 1.25f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1100, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulseScale"
+    )
+    Box(
+        modifier = modifier
+            .size(10.dp)
+            .graphicsLayer {
+                val s = if (active) pulse else 1f
+                scaleX = s
+                scaleY = s
+            }
+            .clip(CircleShape)
+            .background(color)
+    )
+}
+
+@Composable
+fun ExpressiveTelemetryTile(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    containerColor: Color = MaterialTheme.colorScheme.surface.copy(alpha = 0.55f),
+    valueColor: Color = MaterialTheme.colorScheme.onSurface
+) {
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = containerColor,
+        modifier = modifier
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            horizontalAlignment = Alignment.Start
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = value,
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold,
+                color = valueColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
     }
 }
 

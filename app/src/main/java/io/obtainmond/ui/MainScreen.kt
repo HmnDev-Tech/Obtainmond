@@ -6,12 +6,30 @@ import android.content.Context
 import android.os.Build
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -24,6 +42,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -37,11 +56,13 @@ import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.BlurOn
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Contrast
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Memory
@@ -109,6 +130,9 @@ import io.obtainmond.rust.ObtainmondNative
 import io.obtainmond.ui.compose.ExpressiveCard
 import io.obtainmond.ui.compose.ExpressiveFloatingNavigationBar
 import io.obtainmond.ui.compose.ExpressiveNavDestination
+import io.obtainmond.ui.compose.ExpressivePulsingDot
+import io.obtainmond.ui.compose.ExpressiveStaggeredEntrance
+import io.obtainmond.ui.compose.ExpressiveTelemetryTile
 import io.obtainmond.ui.compose.ObtainmondExpressiveTheme
 import io.obtainmond.ui.compose.SettingsGroup
 import io.obtainmond.ui.compose.SliderSettingsRow
@@ -351,16 +375,30 @@ private fun AppsDashboardPage(
                     Text(
                         text = "Obtainmond",
                         style = MaterialTheme.typography.headlineLarge,
-                        fontWeight = FontWeight.ExtraBold
+                        fontWeight = FontWeight.ExtraBold,
+                        maxLines = 1
                     )
-                    Text(
-                        text = "Rust Core • Zero-Touch Shevery/Shizuku Auto-Updater",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Spacer(Modifier.height(4.dp))
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.secondaryContainer
+                    ) {
+                        Text(
+                            text = "Rust Core • Zero-Touch Auto-Updater",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
+                Spacer(Modifier.width(12.dp))
                 FilledTonalButton(
                     enabled = !isRefreshingAll,
+                    shape = CircleShape,
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
                     onClick = {
                         scope.launch {
                             isRefreshingAll = true
@@ -378,13 +416,13 @@ private fun AppsDashboardPage(
                     }
                 ) {
                     if (isRefreshingAll) {
-                        LoadingIndicator(modifier = Modifier.size(20.dp))
+                        LoadingIndicator(modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text("Syncing")
+                        Text("Syncing", maxLines = 1)
                     } else {
                         Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("Sync & Update")
+                        Text("Sync", maxLines = 1)
                     }
                 }
             }
@@ -392,98 +430,179 @@ private fun AppsDashboardPage(
 
         // Expressive Privilege & Battery Doze Status Hero Card
         item {
+            val isPrivileged = privStatus.hasPrivilegedShell
             ExpressiveCard(
-                containerColor = if (privStatus.hasPrivilegedShell) {
+                containerColor = if (isPrivileged) {
                     MaterialTheme.colorScheme.primaryContainer
                 } else {
-                    MaterialTheme.colorScheme.secondaryContainer
+                    MaterialTheme.colorScheme.surfaceContainerHigh
                 },
-                contentColor = if (privStatus.hasPrivilegedShell) {
+                contentColor = if (isPrivileged) {
                     MaterialTheme.colorScheme.onPrimaryContainer
                 } else {
-                    MaterialTheme.colorScheme.onSecondaryContainer
+                    MaterialTheme.colorScheme.onSurface
                 }
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Box(
                         modifier = Modifier
                             .size(44.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.25f)),
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(
+                                if (isPrivileged) {
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+                                } else {
+                                    MaterialTheme.colorScheme.secondaryContainer
+                                }
+                            ),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = if (privStatus.hasPrivilegedShell) {
-                                Icons.Filled.Bolt
+                            imageVector = if (isPrivileged) Icons.Filled.Bolt else Icons.Filled.Security,
+                            contentDescription = null,
+                            tint = if (isPrivileged) {
+                                MaterialTheme.colorScheme.primary
                             } else {
-                                Icons.Filled.Security
-                            },
-                            contentDescription = null
+                                MaterialTheme.colorScheme.onSecondaryContainer
+                            }
                         )
                     }
-                    Spacer(Modifier.width(14.dp))
+                    Spacer(Modifier.width(12.dp))
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = privStatus.activeBackendLabel,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
-                        )
-                        val abiPrimary = Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
-                        val batteryBadge = if (privStatus.batteryOptimizationIgnored) {
-                            "Doze Whitelisted"
-                        } else {
-                            "Doze Active"
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            ExpressivePulsingDot(
+                                color = if (isPrivileged) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.tertiary
+                                },
+                                active = isPrivileged
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = privStatus.activeBackendLabel,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
                         }
+                        Spacer(Modifier.height(2.dp))
                         Text(
-                            text = "Primary ABI: $abiPrimary • $batteryBadge • Zero-Touch: ${if (settings.zeroTouchBackgroundUpdate) "ON" else "OFF"}",
-                            style = MaterialTheme.typography.bodySmall
+                            text = if (isPrivileged) {
+                                "Silent background updates ready via IPC"
+                            } else {
+                                "Grant Shevery or Shizuku for silent background installs"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (isPrivileged) {
+                                MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            }
                         )
+                    }
+                    IconButton(
+                        onClick = {
+                            PrivilegeManager.refreshStatus()
+                            Toast.makeText(context, "Refreshed privilege binder", Toast.LENGTH_SHORT).show()
+                        }
+                    ) {
+                        Icon(Icons.Filled.Refresh, contentDescription = "Refresh Binder")
                     }
                 }
 
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(14.dp))
+                val abiPrimary = Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
+                val tileBg = if (isPrivileged) {
+                    MaterialTheme.colorScheme.surface.copy(alpha = 0.35f)
+                } else {
+                    MaterialTheme.colorScheme.surfaceContainerLow
+                }
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.horizontalScroll(rememberScrollState())
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    if (!privStatus.hasPrivilegedShell) {
-                        Button(
-                            onClick = { PrivilegeManager.requestPrivilegePermission(context) }
-                        ) {
-                            Icon(Icons.Filled.VerifiedUser, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text("Grant Shevery / Shizuku")
-                        }
-                    }
-                    if (!privStatus.batteryOptimizationIgnored) {
-                        FilledTonalButton(
-                            onClick = {
-                                scope.launch {
-                                    val res = PrivilegeManager.enforceZeroBatteryRestriction(context, settings)
-                                    if (!res.isSuccess) {
-                                        PrivilegeManager.requestBatteryExemptionDialogIfNeeded(context)
-                                    } else {
-                                        Toast.makeText(
-                                            context,
-                                            "Whitelisted via ${res.backendUsed}",
-                                            Toast.LENGTH_SHORT
-                                        ).show()
-                                    }
-                                }
-                            }
-                        ) {
-                            Icon(Icons.Filled.BatteryChargingFull, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text("Bypass Battery Optimization")
-                        }
-                    }
-                    AssistChip(
-                        onClick = { PrivilegeManager.refreshStatus() },
-                        label = { Text("Refresh Binder") },
-                        leadingIcon = {
-                            Icon(Icons.Filled.Memory, contentDescription = null, modifier = Modifier.size(16.dp))
-                        }
+                    ExpressiveTelemetryTile(
+                        label = "Primary ABI",
+                        value = abiPrimary,
+                        containerColor = tileBg,
+                        modifier = Modifier.weight(1f)
                     )
+                    ExpressiveTelemetryTile(
+                        label = "Doze",
+                        value = if (privStatus.batteryOptimizationIgnored) "Exempt" else "Active",
+                        containerColor = tileBg,
+                        valueColor = if (privStatus.batteryOptimizationIgnored) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.error
+                        },
+                        modifier = Modifier.weight(1f)
+                    )
+                    ExpressiveTelemetryTile(
+                        label = "Zero-Touch",
+                        value = if (settings.zeroTouchBackgroundUpdate) "ON" else "OFF",
+                        containerColor = tileBg,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                AnimatedVisibility(
+                    visible = !isPrivileged || !privStatus.batteryOptimizationIgnored,
+                    enter = expandVertically(
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioLowBouncy,
+                            stiffness = Spring.StiffnessMediumLow
+                        )
+                    ) + fadeIn(),
+                    exit = shrinkVertically() + fadeOut()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        if (!isPrivileged) {
+                            Button(
+                                onClick = { PrivilegeManager.requestPrivilegePermission(context) },
+                                modifier = Modifier.weight(1f),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp)
+                            ) {
+                                Icon(Icons.Filled.VerifiedUser, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Grant Privilege", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                        if (!privStatus.batteryOptimizationIgnored) {
+                            FilledTonalButton(
+                                onClick = {
+                                    scope.launch {
+                                        val res = PrivilegeManager.enforceZeroBatteryRestriction(context, settings)
+                                        if (!res.isSuccess) {
+                                            PrivilegeManager.requestBatteryExemptionDialogIfNeeded(context)
+                                        } else {
+                                            Toast.makeText(
+                                                context,
+                                                "Whitelisted via ${res.backendUsed}",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.weight(1f),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp)
+                            ) {
+                                Icon(Icons.Filled.BatteryChargingFull, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Bypass Doze", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -493,22 +612,39 @@ private fun AppsDashboardPage(
             OutlinedTextField(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
-                placeholder = { Text("Filter tracked apps, package IDs, or authors...") },
+                placeholder = { Text("Search apps, package IDs, authors...") },
                 leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                trailingIcon = {
+                    AnimatedVisibility(
+                        visible = searchQuery.isNotBlank(),
+                        enter = scaleIn() + fadeIn(),
+                        exit = scaleOut() + fadeOut()
+                    ) {
+                        IconButton(onClick = { searchQuery = "" }) {
+                            Icon(Icons.Filled.Close, contentDescription = "Clear search")
+                        }
+                    }
+                },
                 singleLine = true,
-                shape = RoundedCornerShape(24.dp),
+                shape = CircleShape,
                 modifier = Modifier.fillMaxWidth()
             )
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(10.dp))
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.horizontalScroll(rememberScrollState())
             ) {
                 allCategories.forEach { cat ->
+                    val count = when (cat) {
+                        "All" -> apps.size
+                        "Updates" -> apps.count { it.hasUpdate }
+                        else -> apps.count { cat in it.categories }
+                    }
                     FilterChip(
                         selected = selectedCategory == cat,
                         onClick = { selectedCategory = cat },
-                        label = { Text(cat) }
+                        shape = CircleShape,
+                        label = { Text("$cat ($count)") }
                     )
                 }
             }
@@ -537,17 +673,19 @@ private fun AppsDashboardPage(
                 }
             }
         } else {
-            items(filteredApps, key = { it.id + it.url }) { app ->
-                TrackedAppExpressiveCard(
-                    app = app,
-                    isBusy = app.id in busyIds
-                )
+            itemsIndexed(filteredApps, key = { _, app -> app.id + app.url }) { index, app ->
+                ExpressiveStaggeredEntrance(index = index) {
+                    TrackedAppExpressiveCard(
+                        app = app,
+                        isBusy = app.id in busyIds
+                    )
+                }
             }
         }
     }
 }
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalLayoutApi::class)
 @Composable
 private fun TrackedAppExpressiveCard(
     app: TrackedApp,
@@ -557,16 +695,33 @@ private fun TrackedAppExpressiveCard(
     val scope = rememberCoroutineScope()
     var expanded by rememberSaveable(app.id) { mutableStateOf(false) }
 
+    val chevronRotation by animateFloatAsState(
+        targetValue = if (expanded) 180f else 0f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "chevronRot"
+    )
+
     ExpressiveCard(
+        containerColor = if (expanded) {
+            MaterialTheme.colorScheme.surfaceContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerLow
+        },
+        topCorner = if (expanded) 24.dp else 28.dp,
+        bottomCorner = if (expanded) 24.dp else 28.dp,
         onClick = { expanded = !expanded }
     ) {
+        // Row 1: App Monogram + Full-width Name/ID + Source Pill + Expand Chevron
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
                 modifier = Modifier
-                    .size(46.dp)
+                    .size(48.dp)
                     .clip(RoundedCornerShape(16.dp))
                     .background(
                         if (app.hasUpdate) {
@@ -590,15 +745,18 @@ private fun TrackedAppExpressiveCard(
             }
             Spacer(Modifier.width(14.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
                     Text(
                         text = app.name,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
                     )
-                    Spacer(Modifier.width(8.dp))
                     Surface(
                         shape = CircleShape,
                         color = MaterialTheme.colorScheme.surfaceContainerHighest
@@ -607,11 +765,11 @@ private fun TrackedAppExpressiveCard(
                             text = app.sourceType,
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                            maxLines = 1
                         )
                     }
                     if (app.isFrozen) {
-                        Spacer(Modifier.width(6.dp))
                         Surface(
                             shape = CircleShape,
                             color = MaterialTheme.colorScheme.errorContainer
@@ -620,38 +778,87 @@ private fun TrackedAppExpressiveCard(
                                 text = "FROZEN",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onErrorContainer,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+                                maxLines = 1
                             )
                         }
                     }
                 }
+                Spacer(Modifier.height(2.dp))
                 Text(
-                    text = "${app.id} • by ${app.author}",
+                    text = "${app.id} • ${app.author}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                val instLabel = app.installedVersion.ifBlank { "Not installed" }
-                val remLabel = app.latestVersion.ifBlank { "Unchecked" }
-                val abiBadge = app.matchedAbi.ifBlank { app.installedAbi.ifBlank { "auto-abi" } }
-                Text(
-                    text = "Installed: $instLabel  →  Latest: $remLabel ($abiBadge)",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = if (app.hasUpdate) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                    fontWeight = if (app.hasUpdate) FontWeight.Bold else FontWeight.Normal
-                )
+            }
+            Spacer(Modifier.width(6.dp))
+            Icon(
+                imageVector = Icons.Filled.ExpandMore,
+                contentDescription = if (expanded) "Collapse" else "Expand",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .size(24.dp)
+                    .graphicsLayer { rotationZ = chevronRotation }
+            )
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        // Row 2: Version Telemetry Pill + Primary Action Button (never squished!)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            val instLabel = app.installedVersion.ifBlank { "Not installed" }
+            val remLabel = app.latestVersion.ifBlank { "Unchecked" }
+            val abiBadge = app.matchedAbi.ifBlank { app.installedAbi.ifBlank { "auto" } }
+
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = if (app.hasUpdate) {
+                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f)
+                } else {
+                    MaterialTheme.colorScheme.surfaceContainerHigh
+                },
+                modifier = Modifier.weight(1f, fill = false)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "$instLabel → $remLabel",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = if (app.hasUpdate) FontWeight.Bold else FontWeight.Medium,
+                        color = if (app.hasUpdate) {
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        },
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = "• $abiBadge",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1
+                    )
+                }
             }
 
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(10.dp))
             if (isBusy) {
                 LoadingIndicator(modifier = Modifier.size(32.dp))
             } else if (app.hasUpdate || app.installedVersion.isBlank()) {
                 Button(
+                    shape = CircleShape,
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
                     onClick = {
                         scope.launch {
                             if (app.matchedApkUrl.isBlank()) {
@@ -667,18 +874,50 @@ private fun TrackedAppExpressiveCard(
                 ) {
                     Icon(Icons.Filled.Download, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text(if (app.installedVersion.isBlank()) "Install" else "Update")
+                    Text(if (app.installedVersion.isBlank()) "Install" else "Update", maxLines = 1)
                 }
             } else {
-                Icon(
-                    imageVector = Icons.Filled.CheckCircle,
-                    contentDescription = "Up to date",
-                    tint = MaterialTheme.colorScheme.primary
-                )
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.secondaryContainer
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.CheckCircle,
+                            contentDescription = "Up to date",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            text = "Latest",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                    }
+                }
             }
         }
 
-        AnimatedVisibility(visible = expanded) {
+        AnimatedVisibility(
+            visible = expanded,
+            enter = expandVertically(
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioLowBouncy,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            ) + fadeIn(tween(220)),
+            exit = shrinkVertically(
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessMedium
+                )
+            ) + fadeOut(tween(150))
+        ) {
             Column(modifier = Modifier.padding(top = 14.dp)) {
                 Surface(
                     shape = RoundedCornerShape(16.dp),
@@ -692,6 +931,7 @@ private fun TrackedAppExpressiveCard(
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.primary
                         )
+                        Spacer(Modifier.height(2.dp))
                         Text(
                             text = "Selected APK: ${app.matchedApkName.ifBlank { "Pending release sync" }}",
                             style = MaterialTheme.typography.bodySmall,
@@ -732,6 +972,7 @@ private fun TrackedAppExpressiveCard(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
+                    Spacer(Modifier.width(12.dp))
                     Switch(
                         checked = app.silentAutoUpdate,
                         onCheckedChange = { AppRepository.toggleSilentAutoUpdate(app.id, it) }
@@ -753,9 +994,10 @@ private fun TrackedAppExpressiveCard(
                 }
 
                 Spacer(Modifier.height(12.dp))
-                Row(
+                FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.horizontalScroll(rememberScrollState())
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
                     FilledTonalButton(
                         onClick = {
@@ -771,7 +1013,7 @@ private fun TrackedAppExpressiveCard(
                     ) {
                         Icon(Icons.Filled.Bolt, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("Force Silent Reinstall")
+                        Text("Force Reinstall")
                     }
 
                     if (app.backupApkPath.isNotBlank()) {
@@ -789,7 +1031,7 @@ private fun TrackedAppExpressiveCard(
                         ) {
                             Icon(Icons.Filled.Restore, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text("Rollback (v${app.backupVersion})")
+                            Text("Rollback v${app.backupVersion}")
                         }
                     }
 
@@ -885,29 +1127,41 @@ private fun AddAppPage(
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                if (resolvedPreview != null) {
-                    Spacer(Modifier.height(10.dp))
-                    Surface(
-                        shape = RoundedCornerShape(14.dp),
-                        color = MaterialTheme.colorScheme.secondaryContainer,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Text(
-                                text = "Rust URL Resolver: ${resolvedPreview.sourceType}",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSecondaryContainer
-                            )
-                            Text(
-                                text = "Owner/Repo: ${resolvedPreview.owner}/${resolvedPreview.repo}",
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                            Text(
-                                text = "Target Device ABI: ${Build.SUPPORTED_ABIS.joinToString(", ")}",
-                                style = MaterialTheme.typography.bodySmall,
-                                fontFamily = FontFamily.Monospace
-                            )
+                AnimatedVisibility(
+                    visible = resolvedPreview != null,
+                    enter = expandVertically(
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioLowBouncy,
+                            stiffness = Spring.StiffnessMediumLow
+                        )
+                    ) + fadeIn(),
+                    exit = shrinkVertically() + fadeOut()
+                ) {
+                    if (resolvedPreview != null) {
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = MaterialTheme.colorScheme.secondaryContainer,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 10.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text(
+                                    text = "Rust URL Resolver: ${resolvedPreview.sourceType}",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                                )
+                                Text(
+                                    text = "Owner/Repo: ${resolvedPreview.owner}/${resolvedPreview.repo}",
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                                Text(
+                                    text = "Target Device ABI: ${Build.SUPPORTED_ABIS.joinToString(", ")}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
                         }
                     }
                 }
@@ -1291,11 +1545,12 @@ private fun ObtainedLabsPage(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(Modifier.height(12.dp))
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    modifier = Modifier.horizontalScroll(rememberScrollState())
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
                     Button(
+                        modifier = Modifier.fillMaxWidth(),
                         onClick = {
                             scope.launch {
                                 var compiled = 0
@@ -1314,11 +1569,12 @@ private fun ObtainedLabsPage(
                         }
                     ) {
                         Icon(Icons.Filled.Speed, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
+                        Spacer(Modifier.width(8.dp))
                         Text("Dexopt Boost All Apps")
                     }
 
                     FilledTonalButton(
+                        modifier = Modifier.fillMaxWidth(),
                         onClick = {
                             AutoUpdateWorker.triggerImmediateBackgroundCheck(context)
                             Toast.makeText(
@@ -1329,7 +1585,7 @@ private fun ObtainedLabsPage(
                         }
                     ) {
                         Icon(Icons.Filled.Bolt, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
+                        Spacer(Modifier.width(8.dp))
                         Text("Trigger Background Worker Now")
                     }
                 }
@@ -1469,24 +1725,32 @@ private fun SettingsAndLogsPage(
                 title = "Material 3 Expressive & Motion Blur",
                 items = listOf(
                     {
-                        Row(
+                        Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 20.dp, vertical = 14.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
+                                .padding(horizontal = 20.dp, vertical = 14.dp)
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Filled.DarkMode, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                                 Spacer(Modifier.width(12.dp))
-                                Text("Theme Mode", style = MaterialTheme.typography.titleMedium)
+                                Text("Theme Mode", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
                             }
-                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Spacer(Modifier.height(10.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
                                 listOf(0 to "Auto", 1 to "Light", 2 to "Dark").forEach { (mode, label) ->
                                     FilterChip(
                                         selected = settings.themeMode == mode,
                                         onClick = { AppRepository.updateSettings { it.copy(themeMode = mode) } },
-                                        label = { Text(label) }
+                                        shape = CircleShape,
+                                        label = {
+                                            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                                Text(label, maxLines = 1)
+                                            }
+                                        },
+                                        modifier = Modifier.weight(1f)
                                     )
                                 }
                             }
