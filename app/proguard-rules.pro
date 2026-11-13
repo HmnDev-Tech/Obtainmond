@@ -12,6 +12,13 @@
 }
 -keep,includedescriptorclasses class **$$serializer { *; }
 
+-keep class * extends androidx.room.RoomDatabase {
+    <init>();
+}
+-keep class androidx.work.impl.WorkDatabase_Impl { *; }
+-keep class androidx.work.** { *; }
+-keep class androidx.startup.** { *; }
+
 -dontwarn rikka.shizuku.**
 -dontwarn com.hamondev.shevery.api.**
 -dontwarn okhttp3.**
