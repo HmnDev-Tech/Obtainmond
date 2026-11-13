@@ -13,13 +13,17 @@ import com.hamondev.shevery.api.SheveryPrivilege
 import io.obtainmond.data.model.ObtainmondSettings
 import io.obtainmond.data.model.PrivilegeBackendMode
 import io.obtainmond.rust.ObtainmondNative
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import rikka.shizuku.Shizuku
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
 
 data class PrivilegeStatus(
     val sheveryBinderAlive: Boolean = false,
@@ -48,33 +52,47 @@ data class ShellExecOutcome(
 
 object PrivilegeManager {
     private const val REQUEST_CODE_PRIVILEGE = 4201
+    private val VALID_PACKAGE_REGEX = Regex("^[a-zA-Z][a-zA-Z0-9_]*(\\.[a-zA-Z0-9_]+)+$")
+    private val ALLOWED_DEXOPT_MODES = setOf("speed-profile", "speed", "everything", "quicken")
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val refreshInFlight = AtomicBoolean(false)
 
     private val _status = MutableStateFlow(PrivilegeStatus())
     val status: StateFlow<PrivilegeStatus> = _status.asStateFlow()
 
+    @Volatile
     private var initialized = false
     private lateinit var appContext: Context
 
+    private fun validatePackageName(packageName: String): String {
+        val trimmed = packageName.trim()
+        require(VALID_PACKAGE_REGEX.matches(trimmed)) { "Invalid Android package name: $packageName" }
+        return trimmed
+    }
+
+    private fun shellQuote(arg: String): String = "'" + arg.replace("'", "'\"'\"'") + "'"
+
     private val sheveryBinderReceivedListener = SheveryPrivilege.OnBinderReceivedListener {
-        refreshStatus()
+        refreshStatus(connectShevery = false)
     }
     private val sheveryBinderDeadListener = SheveryPrivilege.OnBinderDeadListener {
-        refreshStatus()
+        refreshStatus(connectShevery = false)
     }
     private val sheveryPermListener =
         SheveryPrivilege.OnPermissionResultListener { _, _ ->
-            refreshStatus()
+            refreshStatus(connectShevery = false)
         }
 
     private val shizukuBinderReceivedListener = Shizuku.OnBinderReceivedListener {
-        refreshStatus()
+        refreshStatus(connectShevery = false)
     }
     private val shizukuBinderDeadListener = Shizuku.OnBinderDeadListener {
-        refreshStatus()
+        refreshStatus(connectShevery = false)
     }
     private val shizukuPermListener =
         Shizuku.OnRequestPermissionResultListener { _, _ ->
-            refreshStatus()
+            refreshStatus(connectShevery = false)
         }
 
     fun init(context: Context) {
@@ -89,14 +107,25 @@ object PrivilegeManager {
             Shizuku.addBinderDeadListener(shizukuBinderDeadListener)
             Shizuku.addRequestPermissionResultListener(shizukuPermListener)
         }
-        // Pull active Shevery binder immediately via Shevery-API v14.6.4 fast path
-        runCatching { SheveryPrivilege.connectFast(appContext) }
-        refreshStatus()
+        refreshStatus(connectShevery = true)
     }
 
-    fun refreshStatus() {
+    fun refreshStatus(connectShevery: Boolean = true) {
         if (!::appContext.isInitialized) return
-        runCatching { SheveryPrivilege.connectFast(appContext) }
+        scope.launch {
+            refreshStatusSuspend(connectShevery)
+        }
+    }
+
+    private suspend fun refreshStatusSuspend(connectShevery: Boolean = true) = withContext(Dispatchers.IO) {
+        if (!::appContext.isInitialized) return@withContext
+        if (connectShevery && refreshInFlight.compareAndSet(false, true)) {
+            try {
+                runCatching { SheveryPrivilege.connectFast(appContext) }
+            } finally {
+                refreshInFlight.set(false)
+            }
+        }
 
         val sheveryAlive = runCatching { SheveryPrivilege.pingBinder() }.getOrDefault(false)
         val sheveryGranted = sheveryAlive && runCatching { SheveryPrivilege.isGranted() }.getOrDefault(false)
@@ -148,16 +177,19 @@ object PrivilegeManager {
     }
 
     fun requestPrivilegePermission(context: Context) {
-        runCatching { SheveryPrivilege.connectFast(context) }
-        if (runCatching { SheveryPrivilege.pingBinder() }.getOrDefault(false)) {
-            if (!SheveryPrivilege.isGranted()) {
-                runCatching { SheveryPrivilege.requestPermission(REQUEST_CODE_PRIVILEGE) }
-                return
+        val appCtx = context.applicationContext
+        scope.launch {
+            runCatching { SheveryPrivilege.connectFast(appCtx) }
+            if (runCatching { SheveryPrivilege.pingBinder() }.getOrDefault(false)) {
+                if (!SheveryPrivilege.isGranted()) {
+                    runCatching { SheveryPrivilege.requestPermission(REQUEST_CODE_PRIVILEGE) }
+                    return@launch
+                }
             }
-        }
-        if (runCatching { Shizuku.pingBinder() }.getOrDefault(false)) {
-            if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
-                runCatching { Shizuku.requestPermission(REQUEST_CODE_PRIVILEGE) }
+            if (runCatching { Shizuku.pingBinder() }.getOrDefault(false)) {
+                if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
+                    runCatching { Shizuku.requestPermission(REQUEST_CODE_PRIVILEGE) }
+                }
             }
         }
     }
@@ -171,7 +203,7 @@ object PrivilegeManager {
         preferredMode: PrivilegeBackendMode = PrivilegeBackendMode.AUTO,
         timeoutMs: Long = 90_000L
     ): ShellExecOutcome = withContext(Dispatchers.IO) {
-        refreshStatus()
+        refreshStatusSuspend(connectShevery = true)
         val current = _status.value
 
         val tryShevery = preferredMode == PrivilegeBackendMode.AUTO || preferredMode == PrivilegeBackendMode.SHEVERY
@@ -228,7 +260,18 @@ object PrivilegeManager {
         // 2. Secondary Path: Shizuku Compatibility API
         if (tryShizuku && current.shizukuBinderAlive && current.shizukuGranted) {
             val shizukuOutcome = runCatching {
-                val proc = SheveryPrivilege.newProcess(arrayOf("sh", "-c", command), null, null)
+                val newProcessMethod = Shizuku::class.java.getDeclaredMethod(
+                    "newProcess",
+                    Array<String>::class.java,
+                    Array<String>::class.java,
+                    String::class.java
+                ).apply { isAccessible = true }
+                val proc = newProcessMethod.invoke(
+                    null,
+                    arrayOf("sh", "-c", command),
+                    null,
+                    null
+                ) as Process
                 val out = proc.inputStream.bufferedReader().use { it.readText() }
                 val err = proc.errorStream.bufferedReader().use { it.readText() }
                 val code = proc.waitFor()
@@ -283,7 +326,7 @@ object PrivilegeManager {
         context: Context,
         settings: ObtainmondSettings
     ): ShellExecOutcome {
-        val pkg = context.packageName
+        val pkg = shellQuote(validatePackageName(context.packageName))
         val cmds = buildList {
             add("dumpsys deviceidle whitelist +$pkg")
             add("cmd deviceidle whitelist +$pkg")
@@ -296,7 +339,7 @@ object PrivilegeManager {
         }.joinToString(" ; ")
 
         val res = execPrivilegedShell(cmds, settings.privilegeMode, timeoutMs = 15_000L)
-        refreshStatus()
+        refreshStatusSuspend(connectShevery = false)
         return res
     }
 
@@ -322,11 +365,12 @@ object PrivilegeManager {
         packageName: String
     ): File? = withContext(Dispatchers.IO) {
         runCatching {
-            val appInfo = context.packageManager.getApplicationInfo(packageName, 0)
+            val safePkg = validatePackageName(packageName)
+            val appInfo = context.packageManager.getApplicationInfo(safePkg, 0)
             val srcFile = File(appInfo.sourceDir)
             if (!srcFile.exists()) return@withContext null
             val rollbackDir = File(context.filesDir, "rollback_vault").apply { mkdirs() }
-            val dstFile = File(rollbackDir, "${packageName}_rollback.apk")
+            val dstFile = File(rollbackDir, "${safePkg}_rollback.apk")
             srcFile.copyTo(dstFile, overwrite = true)
             dstFile
         }.getOrNull()
@@ -346,8 +390,13 @@ object PrivilegeManager {
         allowDowngrade: Boolean = false
     ): ShellExecOutcome = withContext(Dispatchers.IO) {
         if (settings.privilegeMode != PrivilegeBackendMode.SYSTEM) {
+            val safeTargetPkg = if (targetPackageId.isNotBlank()) {
+                runCatching { validatePackageName(targetPackageId) }.getOrNull().orEmpty()
+            } else {
+                ""
+            }
             val stagePath = "/data/local/tmp/obtainmond_${System.currentTimeMillis()}.apk"
-            val dexoptTarget = if (settings.labPostInstallDexoptSpeedProfile) targetPackageId else ""
+            val dexoptTarget = if (settings.labPostInstallDexoptSpeedProfile) safeTargetPkg else ""
             val installCmd = ObtainmondNative.buildInstallShellCmd(
                 apkPath = stagePath,
                 installerPackage = settings.installerSpoofPreset.packageId,
@@ -414,8 +463,11 @@ object PrivilegeManager {
         freeze: Boolean,
         settings: ObtainmondSettings
     ): ShellExecOutcome {
+        val safePkg = runCatching { validatePackageName(packageName) }.getOrElse {
+            return ShellExecOutcome(-1, "", it.message ?: "Invalid package name", "Validation")
+        }
         val action = if (freeze) "suspend" else "unsuspend"
-        val cmd = "pm $action '$packageName'"
+        val cmd = "pm $action ${shellQuote(safePkg)}"
         return execPrivilegedShell(cmd, settings.privilegeMode, timeoutMs = 15_000L)
     }
 
@@ -427,7 +479,13 @@ object PrivilegeManager {
         mode: String = "speed-profile",
         settings: ObtainmondSettings
     ): ShellExecOutcome {
-        val cmd = "cmd package compile -m $mode -f '$packageName'"
+        val safePkg = runCatching { validatePackageName(packageName) }.getOrElse {
+            return ShellExecOutcome(-1, "", it.message ?: "Invalid package name", "Validation")
+        }
+        if (mode !in ALLOWED_DEXOPT_MODES) {
+            return ShellExecOutcome(-1, "", "Unsupported dexopt mode: $mode", "Validation")
+        }
+        val cmd = "cmd package compile -m $mode -f ${shellQuote(safePkg)}"
         return execPrivilegedShell(cmd, settings.privilegeMode, timeoutMs = 60_000L)
     }
 }

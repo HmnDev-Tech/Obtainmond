@@ -425,7 +425,9 @@ object AppRepository {
     ): Boolean = withContext(Dispatchers.IO) {
         val currentApp = _apps.value.firstOrNull { it.id == appId } ?: return@withContext false
         val rawDownloadUrl = (overrideApkUrl ?: currentApp.matchedApkUrl).trim()
-        if (rawDownloadUrl.isEmpty()) return@withContext false
+        if (!rawDownloadUrl.startsWith("https://") && !rawDownloadUrl.startsWith("http://")) {
+            return@withContext false
+        }
 
         _busyAppIds.value = _busyAppIds.value + appId
         try {
@@ -442,6 +444,8 @@ object AppRepository {
             val downloadsDir = File(appContext.cacheDir, "apk_downloads").apply { mkdirs() }
             val safeFileName = (currentApp.matchedApkName.ifBlank { "${currentApp.id}.apk" })
                 .replace(Regex("[^a-zA-Z0-9._-]"), "_")
+                .trimStart('.')
+                .ifBlank { "obtainmond_download.apk" }
             val targetApkFile = File(downloadsDir, safeFileName)
 
             val req = Request.Builder()
@@ -640,9 +644,11 @@ object AppRepository {
         val trimmed = rawJson.trim()
         val importedApps = mutableListOf<TrackedApp>()
 
+        val validPkgRegex = Regex("^[a-zA-Z][a-zA-Z0-9_]*(\\.[a-zA-Z0-9_]+)+$")
         runCatching {
             if (trimmed.startsWith("[")) {
-                importedApps.addAll(json.decodeFromString<List<TrackedApp>>(trimmed))
+                val decoded = json.decodeFromString<List<TrackedApp>>(trimmed)
+                importedApps.addAll(decoded.filter { validPkgRegex.matches(it.id) })
             } else {
                 val root = json.parseToJsonElement(trimmed).jsonObject
                 val appsArr = root["apps"]?.jsonArray.orEmpty()
@@ -656,9 +662,10 @@ object AppRepository {
                     val installedVer = obj["installedVersion"]?.jsonPrimitive?.content.orEmpty()
                     val latestVer = obj["latestVersion"]?.jsonPrimitive?.content.orEmpty()
                     val desc = ObtainmondNative.resolveSource(url)
+                    val safeId = id.takeIf { validPkgRegex.matches(it) } ?: desc.packageIdHint
                     importedApps.add(
                         TrackedApp(
-                            id = id.ifBlank { desc.packageIdHint },
+                            id = safeId,
                             name = name.ifBlank { desc.appNameHint },
                             author = author.ifBlank { desc.owner },
                             url = desc.canonicalUrl,

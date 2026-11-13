@@ -49,9 +49,9 @@
             </intent-filter>
         </activity>
 
-        <!-- Shevery-API Fast Binder Provider -->
+        <!-- Shevery-API Fast Binder Provider (safe non-reentrant wrapper) -->
         <provider
-            android:name="com.hamondev.shevery.api.SheveryProvider"
+            android:name=".privilege.ObtainmondSheveryProvider"
             android:authorities="${applicationId}.shevery"
             android:enabled="true"
             android:exported="true"

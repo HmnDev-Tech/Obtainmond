@@ -12,6 +12,9 @@ use sources::{parse_release_payload, resolve_source_descriptor};
 use version::{evaluate_update, extract_version_with_regex, normalize_version};
 
 fn jstring_to_rust(env: &mut JNIEnv, input: &JString) -> String {
+    if input.is_null() {
+        return String::new();
+    }
     env.get_string(input)
         .map(|s| s.into())
         .unwrap_or_default()
