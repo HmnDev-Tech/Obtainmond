@@ -47,7 +47,8 @@ data class TrackedApp(
     val backupApkPath: String = "",
     val backupVersion: String = "",
     val lastSha256: String = "",
-    val isFrozen: Boolean = false
+    val isFrozen: Boolean = false,
+    val pinned: Boolean = false
 ) {
     val hasUpdate: Boolean
         get() = !trackOnly &&
@@ -92,5 +93,7 @@ data class ObtainmondSettings(
     val pureBlackOled: Boolean = false,
     val motionBlurEnabled: Boolean = true,
     val motionBlurIntensity: Int = 65,
-    val motionBlurStrength: Int = 60
+    val motionBlurStrength: Int = 60,
+    val groupByCategory: Boolean = false,
+    val appSortMode: Int = 0
 )

@@ -229,7 +229,9 @@ object AppRepository {
         customName: String = "",
         includePrereleases: Boolean = false,
         silentAutoUpdate: Boolean = true,
+        trackOnly: Boolean = false,
         apkFilterRegex: String = "",
+        versionExtractionRegex: String = "",
         category: String = "",
         installImmediately: Boolean = true
     ): Result<TrackedApp> = withContext(Dispatchers.IO) {
@@ -247,7 +249,9 @@ object AppRepository {
                 apiUrl = desc.apiUrl,
                 includePrereleases = includePrereleases,
                 silentAutoUpdate = silentAutoUpdate,
+                trackOnly = trackOnly,
                 apkFilterRegex = apkFilterRegex.trim(),
+                versionExtractionRegex = versionExtractionRegex.trim(),
                 categories = if (category.isBlank()) emptyList() else listOf(category.trim())
             )
 
@@ -283,16 +287,64 @@ object AppRepository {
         }
     }
 
-    fun toggleSilentAutoUpdate(appId: String, enabled: Boolean) {
+    fun removeApps(appIds: Set<String>) {
+        if (appIds.isEmpty()) return
+        scope.launch {
+            mutex.withLock {
+                val next = _apps.value.filterNot { it.id in appIds }
+                _apps.value = next
+                saveAppsToDisk(next)
+            }
+        }
+    }
+
+    fun updateApp(appId: String, transform: (TrackedApp) -> TrackedApp) {
         scope.launch {
             mutex.withLock {
                 val next = _apps.value.map {
-                    if (it.id == appId) it.copy(silentAutoUpdate = enabled) else it
+                    if (it.id == appId) transform(it) else it
                 }
                 _apps.value = next
                 saveAppsToDisk(next)
             }
         }
+    }
+
+    fun toggleSilentAutoUpdate(appId: String, enabled: Boolean) {
+        updateApp(appId) { it.copy(silentAutoUpdate = enabled) }
+    }
+
+    suspend fun checkSingleApp(appId: String): Result<TrackedApp> = withContext(Dispatchers.IO) {
+        runCatching {
+            _busyAppIds.value = _busyAppIds.value + appId
+            try {
+                syncInstalledPackagesState()
+                val current = _apps.value.firstOrNull { it.id == appId }
+                    ?: throw IllegalStateException("App not found")
+                val updated = fetchLatestReleaseForApp(current)
+                mutex.withLock {
+                    val next = _apps.value.map { if (it.id == appId) updated else it }
+                    _apps.value = next
+                    saveAppsToDisk(next)
+                }
+                updated
+            } finally {
+                _busyAppIds.value = _busyAppIds.value - appId
+            }
+        }
+    }
+
+    suspend fun batchUpdateApps(appIds: Set<String>): Int = withContext(Dispatchers.IO) {
+        var count = 0
+        for (id in appIds) {
+            val refreshed = checkSingleApp(id).getOrNull() ?: continue
+            if ((refreshed.hasUpdate || refreshed.installedVersion.isBlank()) && refreshed.matchedApkUrl.isNotBlank()) {
+                if (downloadAndInstallAppSilently(refreshed.id, isBackground = false)) {
+                    count++
+                }
+            }
+        }
+        count
     }
 
     /**

@@ -1,19 +1,36 @@
 # Obtainmond — Design & Architecture Taste (`TASTE.md`)
 
-## 1. Visual Identity & Material 3 Expressive Direction
-- **Engine**: Jetpack Compose + `androidx.compose.material3:material3:1.5.0-alpha16` (`MaterialExpressiveTheme` with `MotionScheme.expressive()`).
-- **Navigation**: Floating Pill Toolbar (`ExpressiveFloatingNavigationBar` built on `HorizontalFloatingToolbar`) suspended above edge-to-edge content with dynamic AGSL directional scroll motion blur (`MotionBlur.kt`).
-- **Surface Hierarchy**:
-  - Grouped expressive cards (`SettingsGroup` / `ExpressiveCard`) with `28.dp` outer corners and `6.dp` inner stacked corners.
-  - Spring-driven interactive scaling (`0.97f` press scale, `Spring.DampingRatioMediumBouncy`) on primary action pills and app cards.
-  - Optional Pure Black (`#000000`) OLED mode and Material You Dynamic Color (`Build.VERSION_CODES.S+`).
+## Direction
+Obtainium-faithful Android app-updater UX elevated with true **Material 3 Expressive** (`androidx.compose.material3:material3:1.5.0-alpha16`, `MotionScheme.expressive()`, `MaterialShapes`, `Morph`, wavy progress, split buttons, floating toolbar + FAB). 100% Jetpack Compose — **zero XML UI layouts, drawables, or animations**.
 
-## 2. Core Engineering Principles
-- **Rust-First Core (`libobtainmond_core.so`)**:
-  - All version normalization, semantic/pre-release comparisons, multi-APK ABI scoring, release API JSON/HTML parsing, and streaming SHA-256 + ZIP Central Directory ABI verification run natively in Rust via JNI.
-- **Dual Privileged Execution (`Shevery-API` v14.6.4 + `Shizuku`)**:
-  - Primary fast-path: `SheveryPrivilege.connectFast(context)` + `SheveryPrivilege.execFast(...)` from `com.hamondev.shevery.api:api:14.6.4`.
-  - Automatic fallback: `rikka.shizuku.Shizuku` binder shell, `su -c` Root shell, or standard Android `PackageInstaller` session.
-- **Zero-Touch Background Auto-Update**:
-  - Self-whitelists `io.obtainmond` from Doze/Battery Optimization via privileged `cmd deviceidle whitelist +io.obtainmond` and `cmd appops set io.obtainmond RUN_ANY_IN_BACKGROUND allow`.
-  - Automatically matches the installed app's CPU ABI (`primaryCpuAbi` / `Build.SUPPORTED_ABIS`) and flavor tokens in Rust so multi-APK releases update silently in the background without user intervention.
+## Type
+- **Display / Headers**: `headlineLarge` / `displaySmall`, `FontWeight.ExtraBold`, tight `-0.5.sp` letter spacing for editorial contrast.
+- **App Rows / Actions**: `titleMedium` (`FontWeight.Bold` / `SemiBold`) paired with `labelMedium` tonal status pills.
+- **Technical Telemetry**: `FontFamily.Monospace` strictly for package IDs, semantic versions, CPU ABIs (`arm64-v8a`), regex filters, and SHA-256 digests.
+
+## Color
+- **Dynamic System Palette**: `dynamicDarkColorScheme` / `dynamicLightColorScheme` on Android 12+ (`S+`), with expressive tonal fallback and optional `#000000` Pure Black OLED surface mode.
+- **Tonal Hierarchy**: Distinct `surfaceContainerLowest` → `surfaceContainerHigh` separation instead of flat monochrome cards; `primaryContainer` / `tertiaryContainer` reserved for active update states and primary actions.
+- **Obtainium Category Accents**: Deterministic hue-mapped vertical color bars (`4.dp` rounded pill) along the start edge of tracked app items.
+
+## Shape & Material
+- **Expressive `MaterialShapes` + `Morph` Transitions** (powered by `androidx.graphics.shapes.Morph` + `.toShape()`):
+  - App Avatar Container: real `PackageManager.getApplicationIcon(pkg)` rendered inside a state-morphing polygon (`Square` / `Clover4Leaf` idle → `Cookie7Sided` update available → `Cookie9Sided` multi-selected → `Diamond` frozen).
+  - Busy Indicators: `ContainedLoadingIndicator` (morphing `MaterialShapes`), `LinearWavyProgressIndicator`, and `CircularWavyProgressIndicator`.
+  - Tactile Controls: `ButtonDefaults.shapes()`, `ToggleButtonDefaults.shapes()`, `SplitButtonLayout` on App Detail, and `ButtonGroup` for segmented selectors.
+  - Floating Toolbar: `HorizontalFloatingToolbar` with `FloatingToolbarDefaults.VibrantFloatingActionButton` (morphs into contextual multi-select batch toolbar when apps are long-pressed).
+- **Surface Variety**: Stacked `SettingsGroup` (`26.dp` outer / `6.dp` inner corners), asymmetric version-compare capsules, and compact Obtainium list rows — never uniform `28.dp` boxes everywhere.
+
+## Spacing & Density
+- **Apps List**: Scannable Obtainium density (`16.dp` horizontal margin, `10.dp` item gap, `4.dp` category accent bar) so tracked apps are immediately visible without scrolling past a giant hero banner.
+- **Detail & Forms**: Progressive disclosure (collapsible advanced fields on Add App; dedicated full-screen App Detail route and categorized Settings sub-pages).
+
+## Motion
+- `MotionScheme.expressive()` globally + bouncy springs (`Spring.DampingRatioMediumBouncy` / `DampingRatioLowBouncy`) for shape morphs, shared scale+fade screen transitions, multi-select reveals, and velocity-driven AGSL directional scroll motion blur (`MotionBlur.kt`).
+
+## Explicitly Avoid
+- Any XML UI (`res/layout/`, XML animations, XML UI themes beyond minimal `android:theme` manifest shell).
+- Giant "AI dashboard" telemetry cards pushing tracked apps off the home screen.
+- Uniform `RoundedCornerShape(28.dp)` cards repeated for every section.
+- Text monogram fallbacks when the real installed Android app icon exists.
+- Cramped inline accordions instead of a proper full-screen App Detail view.
