@@ -5,7 +5,6 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.drawable.AdaptiveIconDrawable
-import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.os.Build
 import androidx.compose.animation.AnimatedVisibility
@@ -135,8 +134,8 @@ data class ExpressiveNavDestination(
 private val appIconCache = ConcurrentHashMap<String, ImageBitmap>()
 
 private fun drawableToBitmap(drawable: Drawable): Bitmap {
+    val size = 256
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && drawable is AdaptiveIconDrawable) {
-        val size = 256
         val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         val inset = (size * 0.175f).toInt()
@@ -150,28 +149,58 @@ private fun drawableToBitmap(drawable: Drawable): Bitmap {
         }
         return bitmap
     }
-    if (
-        drawable is BitmapDrawable &&
-        drawable.bitmap != null &&
-        drawable.bitmap.width == drawable.bitmap.height &&
-        drawable.bitmap.width >= 96
-    ) {
-        return drawable.bitmap
+    val raw = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+    val rawCanvas = Canvas(raw)
+    drawable.setBounds(0, 0, size, size)
+    drawable.draw(rawCanvas)
+    if (android.graphics.Color.alpha(raw.getPixel(8, 8)) < 200) {
+        val normalized = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val normCanvas = Canvas(normalized)
+        val edgeColor = raw.getPixel(size / 2, (size * 0.18f).toInt())
+        if (android.graphics.Color.alpha(edgeColor) >= 200) {
+            normCanvas.drawColor(edgeColor)
+        }
+        normCanvas.save()
+        normCanvas.scale(1.18f, 1.18f, size / 2f, size / 2f)
+        normCanvas.drawBitmap(raw, 0f, 0f, null)
+        normCanvas.restore()
+        return normalized
     }
-    val maxIntrinsic = maxOf(drawable.intrinsicWidth, drawable.intrinsicHeight)
-    val size = if (maxIntrinsic > 0) maxIntrinsic.coerceIn(192, 384) else 256
-    val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-    val canvas = Canvas(bitmap)
-    drawable.setBounds(0, 0, canvas.width, canvas.height)
-    drawable.draw(canvas)
-    return bitmap
+    return raw
 }
 
 private suspend fun loadPackageIcon(context: Context, packageId: String): ImageBitmap? {
     appIconCache[packageId]?.let { return it }
     return withContext(Dispatchers.IO) {
         runCatching {
-            val drawable = context.packageManager.getApplicationIcon(packageId)
+            if (packageId == context.packageName) {
+                val size = 256
+                val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+                val canvas = Canvas(bitmap)
+                canvas.drawColor(0xFF18122B.toInt())
+                val inset = (size * 0.16f).toInt()
+                context.getDrawable(io.obtainmond.R.drawable.ic_launcher_foreground)?.apply {
+                    setBounds(-inset, -inset, size + inset, size + inset)
+                    draw(canvas)
+                }
+                val bmp = bitmap.asImageBitmap()
+                appIconCache[packageId] = bmp
+                return@runCatching bmp
+            }
+            val pm = context.packageManager
+            val appInfo = pm.getApplicationInfo(packageId, 0)
+            val drawable = runCatching {
+                val res = pm.getResourcesForApplication(appInfo)
+                if (appInfo.icon != 0) {
+                    res.getDrawableForDensity(
+                        appInfo.icon,
+                        android.util.DisplayMetrics.DENSITY_XXXHIGH,
+                        null
+                    )
+                } else {
+                    null
+                }
+            }.getOrNull() ?: pm.getApplicationIcon(packageId)
             val bmp = drawableToBitmap(drawable).asImageBitmap()
             appIconCache[packageId] = bmp
             bmp
