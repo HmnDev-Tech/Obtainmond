@@ -48,17 +48,35 @@ data class TrackedApp(
     val backupVersion: String = "",
     val lastSha256: String = "",
     val isFrozen: Boolean = false,
-    val pinned: Boolean = false
+    val pinned: Boolean = false,
+    val installedReleaseTag: String = "",
+    val installedApkUrl: String = ""
 ) {
     val hasUpdate: Boolean
-        get() = !trackOnly &&
-            latestVersion.isNotBlank() &&
-            (installedVersion.isBlank() ||
-                io.obtainmond.rust.ObtainmondNative.safeIsUpdateAvailable(
-                    installedVersion,
-                    latestVersion,
-                    allowDowngrade
-                ))
+        get() {
+            if (trackOnly || latestVersion.isBlank() || installedVersion.isBlank()) return false
+            if (!allowDowngrade) {
+                if (installedReleaseTag.isNotBlank() &&
+                    io.obtainmond.rust.ObtainmondNative.areVersionsEquivalent(installedReleaseTag, latestVersion)
+                ) {
+                    return false
+                }
+                if (installedApkUrl.isNotBlank() &&
+                    matchedApkUrl.isNotBlank() &&
+                    installedApkUrl == matchedApkUrl
+                ) {
+                    return false
+                }
+                if (io.obtainmond.rust.ObtainmondNative.areVersionsEquivalent(installedVersion, latestVersion)) {
+                    return false
+                }
+            }
+            return io.obtainmond.rust.ObtainmondNative.safeIsUpdateAvailable(
+                installedVersion,
+                latestVersion,
+                allowDowngrade
+            )
+        }
 }
 
 @Serializable
@@ -95,5 +113,13 @@ data class ObtainmondSettings(
     val motionBlurIntensity: Int = 65,
     val motionBlurStrength: Int = 60,
     val groupByCategory: Boolean = false,
-    val appSortMode: Int = 0
+    val appSortMode: Int = 0,
+    val autoScaleUi: Boolean = true,
+    val uiScalePercent: Int = 100,
+    val checkUpdatesOnStartup: Boolean = true,
+    val wifiOnlyBackgroundUpdates: Boolean = false,
+    val deleteApkAfterInstall: Boolean = true,
+    val excludeDebugApks: Boolean = true,
+    val showUpdateNotifications: Boolean = true,
+    val defaultIncludePrereleases: Boolean = false
 )

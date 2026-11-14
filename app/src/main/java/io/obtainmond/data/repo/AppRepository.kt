@@ -11,9 +11,11 @@ import io.obtainmond.data.model.ObtainmondSettings
 import io.obtainmond.data.model.TrackedApp
 import io.obtainmond.privilege.PrivilegeManager
 import io.obtainmond.rust.ObtainmondNative
+import io.obtainmond.worker.AutoUpdateWorker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -70,8 +72,25 @@ object AppRepository {
         appContext = context.applicationContext
         createNotificationChannel()
         loadAllFromDisk()
+        val initialSettings = _settings.value
+        if (initialSettings.zeroTouchBackgroundUpdate) {
+            AutoUpdateWorker.schedulePeriodic(
+                appContext,
+                initialSettings.backgroundIntervalMinutes,
+                initialSettings.wifiOnlyBackgroundUpdates
+            )
+        }
         scope.launch {
             syncInstalledPackagesState()
+            if (_settings.value.checkUpdatesOnStartup) {
+                delay(600)
+                runCatching {
+                    refreshAllAndAutoUpdate(
+                        autoInstallUpdates = _settings.value.zeroTouchBackgroundUpdate,
+                        isBackgroundWorker = true
+                    )
+                }
+            }
         }
     }
 
@@ -194,13 +213,21 @@ object AppRepository {
     suspend fun syncInstalledPackagesState() = withContext(Dispatchers.IO) {
         mutex.withLock {
             val pm = appContext.packageManager
+            val installedList by lazy { runCatching { pm.getInstalledPackages(0) }.getOrDefault(emptyList()) }
             val updated = _apps.value.map { app ->
-                val pkgInfo = runCatching {
+                val directInfo = runCatching {
                     pm.getPackageInfo(app.id, 0)
                 }.getOrNull()
+                val pkgInfo = directInfo ?: installedList.firstOrNull { pkg ->
+                    pkg.packageName.equals(app.id, ignoreCase = true) ||
+                        pkg.applicationInfo?.let { info ->
+                            runCatching { pm.getApplicationLabel(info).toString() }.getOrNull()
+                        }?.equals(app.name, ignoreCase = true) == true
+                }
 
                 if (pkgInfo != null) {
                     val ver = pkgInfo.versionName ?: app.installedVersion
+                    val normalizedVer = ObtainmondNative.safeNormalizeVersion(ver, app.versionExtractionRegex)
                     val detectedAbi = detectInstalledPackageAbi(pkgInfo.applicationInfo?.nativeLibraryDir)
                         .ifEmpty { app.installedAbi }
                     val suspended = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
@@ -208,10 +235,20 @@ object AppRepository {
                     } else {
                         false
                     }
+                    val updatedTag = if (
+                        app.latestVersion.isNotBlank() &&
+                        ObtainmondNative.areVersionsEquivalent(normalizedVer, app.latestVersion)
+                    ) {
+                        app.latestVersion
+                    } else {
+                        app.installedReleaseTag
+                    }
                     app.copy(
-                        installedVersion = ObtainmondNative.safeNormalizeVersion(ver, app.versionExtractionRegex),
+                        id = pkgInfo.packageName,
+                        installedVersion = normalizedVer,
                         installedAbi = detectedAbi,
-                        isFrozen = suspended
+                        isFrozen = suspended,
+                        installedReleaseTag = updatedTag
                     )
                 } else {
                     app
@@ -414,8 +451,17 @@ object AppRepository {
             installedAbi = app.installedAbi,
             previousApkName = app.matchedApkName,
             filterRegex = app.apkFilterRegex,
-            excludeDebug = true
+            excludeDebug = currentSettings.excludeDebugApks
         )
+
+        val matchedTag = if (
+            app.installedVersion.isNotBlank() &&
+            ObtainmondNative.areVersionsEquivalent(app.installedVersion, normalizedRemote)
+        ) {
+            normalizedRemote
+        } else {
+            app.installedReleaseTag
+        }
 
         app.copy(
             sourceType = desc.sourceType,
@@ -427,7 +473,8 @@ object AppRepository {
             selectionReason = "${selection.confidence}: ${selection.reason}",
             availableApks = parsed.apkAssets,
             changelog = parsed.changelog.take(2500),
-            lastCheckedEpochMs = System.currentTimeMillis()
+            lastCheckedEpochMs = System.currentTimeMillis(),
+            installedReleaseTag = matchedTag
         )
     }
 
@@ -604,17 +651,20 @@ object AppRepository {
             )
 
             if (succeeded) {
+                val releaseTag = currentApp.latestVersion.ifBlank { archiveVersion }
                 mutex.withLock {
                     _apps.value = _apps.value.map { item ->
                         if (item.id == appId || item.id == realPackageId) {
                             item.copy(
                                 id = realPackageId,
                                 installedVersion = archiveVersion,
-                                latestVersion = archiveVersion,
+                                latestVersion = releaseTag,
                                 lastUpdatedEpochMs = System.currentTimeMillis(),
                                 backupApkPath = backupPath,
                                 backupVersion = backupVer,
-                                lastSha256 = integrity.sha256Hex
+                                lastSha256 = integrity.sha256Hex,
+                                installedReleaseTag = releaseTag,
+                                installedApkUrl = rawDownloadUrl
                             )
                         } else {
                             item
@@ -623,11 +673,16 @@ object AppRepository {
                     saveAppsToDisk(_apps.value)
                 }
                 syncInstalledPackagesState()
-                postSilentUpdateNotification(
-                    appName = currentApp.name,
-                    newVersion = archiveVersion,
-                    backend = installOutcome.backendUsed
-                )
+                if (currentSettings.deleteApkAfterInstall) {
+                    runCatching { targetApkFile.delete() }
+                }
+                if (currentSettings.showUpdateNotifications) {
+                    postSilentUpdateNotification(
+                        appName = currentApp.name,
+                        newVersion = archiveVersion,
+                        backend = installOutcome.backendUsed
+                    )
+                }
             }
             succeeded
         } catch (e: Throwable) {
@@ -757,6 +812,26 @@ object AppRepository {
             syncInstalledPackagesState()
         }
         importedApps.size
+    }
+
+    fun getApkCacheSizeBytes(): Long {
+        if (!::appContext.isInitialized) return 0L
+        val dir = File(appContext.cacheDir, "apk_downloads")
+        if (!dir.exists()) return 0L
+        return dir.listFiles()?.sumOf { if (it.isFile) it.length() else 0L } ?: 0L
+    }
+
+    fun clearApkCache(): Int {
+        if (!::appContext.isInitialized) return 0
+        val dir = File(appContext.cacheDir, "apk_downloads")
+        if (!dir.exists()) return 0
+        var deleted = 0
+        dir.listFiles()?.forEach { file ->
+            if (file.isFile && file.name.endsWith(".apk", ignoreCase = true) && file.delete()) {
+                deleted++
+            }
+        }
+        return deleted
     }
 
     private fun createNotificationChannel() {

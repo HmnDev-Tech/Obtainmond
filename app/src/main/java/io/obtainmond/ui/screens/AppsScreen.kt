@@ -107,7 +107,6 @@ import io.obtainmond.ui.compose.ExpressiveAppAvatar
 import io.obtainmond.ui.compose.ExpressiveButton
 import io.obtainmond.ui.compose.ExpressivePulsingDot
 import io.obtainmond.ui.compose.ExpressiveShapeBadge
-import io.obtainmond.ui.compose.ExpressiveStaggeredEntrance
 import io.obtainmond.ui.compose.ExpressiveTonalButton
 import io.obtainmond.ui.compose.categoryAccentColor
 import io.obtainmond.ui.compose.scrollMotionBlur
@@ -551,68 +550,64 @@ fun AppsDashboardScreen(
                     )
                 }
                 if (!isCollapsed) {
-                    itemsIndexed(catApps, key = { _, app -> "${categoryName}_${app.id}_${app.url}" }) { index, app ->
-                        ExpressiveStaggeredEntrance(index = index) {
-                            ObtainiumAppRow(
-                                app = app,
-                                isBusy = app.id in busyIds,
-                                isSelected = app.id in selectedAppIds,
-                                selectionActive = selectedAppIds.isNotEmpty(),
-                                onClick = {
-                                    if (selectedAppIds.isNotEmpty()) {
-                                        onToggleSelectApp(app.id)
-                                    } else {
-                                        onOpenAppDetail(app.id)
-                                    }
-                                },
-                                onLongClick = { onToggleSelectApp(app.id) },
-                                onQuickAction = {
-                                    scope.launch {
-                                        if (app.matchedApkUrl.isBlank()) {
-                                            val refreshed = AppRepository.checkSingleApp(app.id).getOrNull()
-                                            if (refreshed != null && refreshed.matchedApkUrl.isNotBlank()) {
-                                                AppRepository.downloadAndInstallAppSilently(refreshed.id, refreshed.matchedApkUrl)
-                                            }
-                                        } else {
-                                            AppRepository.downloadAndInstallAppSilently(app.id)
+                    itemsIndexed(catApps, key = { _, app -> "${categoryName}_${app.id}_${app.url}" }) { _, app ->
+                        ObtainiumAppRow(
+                            app = app,
+                            isBusy = app.id in busyIds,
+                            isSelected = app.id in selectedAppIds,
+                            selectionActive = selectedAppIds.isNotEmpty(),
+                            onClick = {
+                                if (selectedAppIds.isNotEmpty()) {
+                                    onToggleSelectApp(app.id)
+                                } else {
+                                    onOpenAppDetail(app.id)
+                                }
+                            },
+                            onLongClick = { onToggleSelectApp(app.id) },
+                            onQuickAction = {
+                                scope.launch {
+                                    if (app.matchedApkUrl.isBlank()) {
+                                        val refreshed = AppRepository.checkSingleApp(app.id).getOrNull()
+                                        if (refreshed != null && refreshed.matchedApkUrl.isNotBlank()) {
+                                            AppRepository.downloadAndInstallAppSilently(refreshed.id, refreshed.matchedApkUrl)
                                         }
+                                    } else {
+                                        AppRepository.downloadAndInstallAppSilently(app.id)
                                     }
                                 }
-                            )
-                        }
+                            }
+                        )
                     }
                 }
             }
         } else {
-            itemsIndexed(filteredAndSorted, key = { _, app -> app.id + app.url }) { index, app ->
-                ExpressiveStaggeredEntrance(index = index) {
-                    ObtainiumAppRow(
-                        app = app,
-                        isBusy = app.id in busyIds,
-                        isSelected = app.id in selectedAppIds,
-                        selectionActive = selectedAppIds.isNotEmpty(),
-                        onClick = {
-                            if (selectedAppIds.isNotEmpty()) {
-                                onToggleSelectApp(app.id)
-                            } else {
-                                onOpenAppDetail(app.id)
-                            }
-                        },
-                        onLongClick = { onToggleSelectApp(app.id) },
-                        onQuickAction = {
-                            scope.launch {
-                                if (app.matchedApkUrl.isBlank()) {
-                                    val refreshed = AppRepository.checkSingleApp(app.id).getOrNull()
-                                    if (refreshed != null && refreshed.matchedApkUrl.isNotBlank()) {
-                                        AppRepository.downloadAndInstallAppSilently(refreshed.id, refreshed.matchedApkUrl)
-                                    }
-                                } else {
-                                    AppRepository.downloadAndInstallAppSilently(app.id)
+            itemsIndexed(filteredAndSorted, key = { _, app -> app.id + app.url }) { _, app ->
+                ObtainiumAppRow(
+                    app = app,
+                    isBusy = app.id in busyIds,
+                    isSelected = app.id in selectedAppIds,
+                    selectionActive = selectedAppIds.isNotEmpty(),
+                    onClick = {
+                        if (selectedAppIds.isNotEmpty()) {
+                            onToggleSelectApp(app.id)
+                        } else {
+                            onOpenAppDetail(app.id)
+                        }
+                    },
+                    onLongClick = { onToggleSelectApp(app.id) },
+                    onQuickAction = {
+                        scope.launch {
+                            if (app.matchedApkUrl.isBlank()) {
+                                val refreshed = AppRepository.checkSingleApp(app.id).getOrNull()
+                                if (refreshed != null && refreshed.matchedApkUrl.isNotBlank()) {
+                                    AppRepository.downloadAndInstallAppSilently(refreshed.id, refreshed.matchedApkUrl)
                                 }
+                            } else {
+                                AppRepository.downloadAndInstallAppSilently(app.id)
                             }
                         }
-                    )
-                }
+                    }
+                )
             }
         }
     }
@@ -1014,10 +1009,11 @@ private fun ObtainiumAppRow(
                 Spacer(Modifier.height(3.dp))
                 val instVer = app.installedVersion.ifBlank { "Not installed" }
                 val remVer = app.latestVersion.ifBlank { "Unchecked" }
-                val versionLine = if (app.latestVersion.isNotBlank() && app.installedVersion != app.latestVersion) {
-                    "$instVer → $remVer"
-                } else {
-                    instVer
+                val versionLine = when {
+                    app.installedVersion.isBlank() && app.latestVersion.isNotBlank() -> "Latest: $remVer"
+                    app.hasUpdate -> "$instVer → $remVer"
+                    app.installedVersion.isNotBlank() -> "v$instVer"
+                    else -> instVer
                 }
                 Text(
                     text = "$versionLine  •  ${app.matchedAbi.ifBlank { app.installedAbi.ifBlank { "auto" } }}",

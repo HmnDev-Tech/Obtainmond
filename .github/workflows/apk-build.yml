@@ -92,23 +92,8 @@ jobs:
           KEY_PASSWORD=$KEY_PASSWORD
           EOF
           else
-            echo "Generating deterministic unified keystore for both Debug and Release APKs"
-            keytool -genkeypair -v \
-              -keystore keystore.jks \
-              -storetype PKCS12 \
-              -alias obtainmond \
-              -keyalg RSA \
-              -keysize 2048 \
-              -validity 10000 \
-              -storepass obtainmond123 \
-              -keypass obtainmond123 \
-              -dname "CN=Obtainmond, OU=HmnDev-Tech, O=Obtainmond, L=Almaty, S=KZ, C=KZ"
-            cat <<EOF > signing.properties
-          KEYSTORE_FILE=keystore.jks
-          KEYSTORE_PASSWORD=obtainmond123
-          KEY_ALIAS=obtainmond
-          KEY_PASSWORD=obtainmond123
-          EOF
+            echo "Secrets absent; using deterministic embedded unified keystore from signing.gradle"
+            rm -f signing.properties keystore.jks
           fi
 
       - name: Build Debug & Release APKs
@@ -122,10 +107,33 @@ jobs:
         run: |
           APKSIGNER=$(ls -d "$ANDROID_SDK_ROOT"/build-tools/*/apksigner | sort -V | tail -n1)
           echo "Using apksigner: $APKSIGNER"
-          for apk in app/build/outputs/apk/debug/*.apk app/build/outputs/apk/release/*.apk; do
+          DEBUG_SHA=""
+          for apk in app/build/outputs/apk/debug/*.apk; do
             echo "=== Verifying $apk ==="
-            "$APKSIGNER" verify --verbose --print-certs "$apk"
+            OUT=$("$APKSIGNER" verify --verbose --print-certs "$apk")
+            echo "$OUT"
+            SHA=$(echo "$OUT" | grep -m1 "certificate SHA-256 digest:" | awk '{print $NF}')
+            [ -n "$DEBUG_SHA" ] && [ "$DEBUG_SHA" != "$SHA" ] && echo "Debug APK certificate mismatch!" && exit 1
+            DEBUG_SHA="$SHA"
           done
+          RELEASE_SHA=""
+          for apk in app/build/outputs/apk/release/*.apk; do
+            echo "=== Verifying $apk ==="
+            OUT=$("$APKSIGNER" verify --verbose --print-certs "$apk")
+            echo "$OUT"
+            SHA=$(echo "$OUT" | grep -m1 "certificate SHA-256 digest:" | awk '{print $NF}')
+            [ -n "$RELEASE_SHA" ] && [ "$RELEASE_SHA" != "$SHA" ] && echo "Release APK certificate mismatch!" && exit 1
+            RELEASE_SHA="$SHA"
+          done
+          if [ -z "$DEBUG_SHA" ] || [ -z "$RELEASE_SHA" ]; then
+            echo "Missing certificate SHA-256 digest (debug='$DEBUG_SHA', release='$RELEASE_SHA')"
+            exit 1
+          fi
+          if [ "$DEBUG_SHA" != "$RELEASE_SHA" ]; then
+            echo "Certificate mismatch between Debug ($DEBUG_SHA) and Release ($RELEASE_SHA)!"
+            exit 1
+          fi
+          echo "Verified shared Debug & Release certificate SHA-256: $RELEASE_SHA"
 
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4

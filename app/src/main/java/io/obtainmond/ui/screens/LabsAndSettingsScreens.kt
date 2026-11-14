@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.text.format.Formatter
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
@@ -16,6 +17,8 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -39,14 +42,18 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
+import androidx.compose.material.icons.automirrored.rounded.Send
+import androidx.compose.material.icons.rounded.AspectRatio
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.BatteryChargingFull
 import androidx.compose.material.icons.rounded.BlurOn
 import androidx.compose.material.icons.rounded.Bolt
+import androidx.compose.material.icons.rounded.BugReport
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.Contrast
 import androidx.compose.material.icons.rounded.DarkMode
+import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.FolderCopy
@@ -54,6 +61,8 @@ import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.ImportExport
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Key
+import androidx.compose.material.icons.rounded.NewReleases
+import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Restore
@@ -64,6 +73,7 @@ import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.material.icons.rounded.Upload
 import androidx.compose.material.icons.rounded.VerifiedUser
+import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -90,6 +100,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -113,6 +125,7 @@ import io.obtainmond.ui.compose.NavigationSettingsRow
 import io.obtainmond.ui.compose.SettingsGroup
 import io.obtainmond.ui.compose.SliderSettingsRow
 import io.obtainmond.ui.compose.SwitchSettingsRow
+import io.obtainmond.ui.compose.rememberAppIconBitmap
 import io.obtainmond.ui.compose.scrollMotionBlur
 import io.obtainmond.worker.AutoUpdateWorker
 import kotlinx.coroutines.launch
@@ -266,8 +279,67 @@ fun ObtainedLabsScreen(
                             onCheckedChange = { enabled ->
                                 AppRepository.updateSettings { it.copy(zeroTouchBackgroundUpdate = enabled) }
                                 if (enabled) {
-                                    AutoUpdateWorker.schedulePeriodic(context, settings.backgroundIntervalMinutes)
+                                    AutoUpdateWorker.schedulePeriodic(
+                                        context,
+                                        settings.backgroundIntervalMinutes,
+                                        settings.wifiOnlyBackgroundUpdates
+                                    )
                                 }
+                            }
+                        )
+                    },
+                    {
+                        SwitchSettingsRow(
+                            icon = Icons.Rounded.Wifi,
+                            title = "Wi-Fi Only Background Updates",
+                            subtitle = "Defer background sync and downloads on metered networks",
+                            checked = settings.wifiOnlyBackgroundUpdates,
+                            shape = MaterialShapes.Cookie4Sided,
+                            onCheckedChange = { enabled ->
+                                AppRepository.updateSettings { it.copy(wifiOnlyBackgroundUpdates = enabled) }
+                                if (settings.zeroTouchBackgroundUpdate) {
+                                    AutoUpdateWorker.schedulePeriodic(
+                                        context,
+                                        settings.backgroundIntervalMinutes,
+                                        enabled
+                                    )
+                                }
+                            }
+                        )
+                    },
+                    {
+                        SwitchSettingsRow(
+                            icon = Icons.Rounded.Refresh,
+                            title = "Check Updates on App Startup",
+                            subtitle = "Sync tracked releases automatically after launch",
+                            checked = settings.checkUpdatesOnStartup,
+                            shape = MaterialShapes.Flower,
+                            onCheckedChange = { enabled ->
+                                AppRepository.updateSettings { it.copy(checkUpdatesOnStartup = enabled) }
+                            }
+                        )
+                    },
+                    {
+                        SwitchSettingsRow(
+                            icon = Icons.Rounded.Notifications,
+                            title = "Update Notifications",
+                            subtitle = "Show notification after background or silent installation",
+                            checked = settings.showUpdateNotifications,
+                            shape = MaterialShapes.Sunny,
+                            onCheckedChange = { enabled ->
+                                AppRepository.updateSettings { it.copy(showUpdateNotifications = enabled) }
+                            }
+                        )
+                    },
+                    {
+                        SwitchSettingsRow(
+                            icon = Icons.Rounded.DeleteOutline,
+                            title = "Delete Downloaded APK After Install",
+                            subtitle = "Remove temporary APK installer files on successful update",
+                            checked = settings.deleteApkAfterInstall,
+                            shape = MaterialShapes.Gem,
+                            onCheckedChange = { enabled ->
+                                AppRepository.updateSettings { it.copy(deleteApkAfterInstall = enabled) }
                             }
                         )
                     },
@@ -304,7 +376,11 @@ fun ObtainedLabsScreen(
                             unitSuffix = " min",
                             onValueChange = { mins ->
                                 AppRepository.updateSettings { it.copy(backgroundIntervalMinutes = mins) }
-                                AutoUpdateWorker.schedulePeriodic(context, mins)
+                                AutoUpdateWorker.schedulePeriodic(
+                                    context,
+                                    mins,
+                                    settings.wifiOnlyBackgroundUpdates
+                                )
                             }
                         )
                     }
@@ -844,6 +920,38 @@ private fun AppearanceSettingsSubPage(
 
         item {
             SettingsGroup(
+                title = "Display & Auto Scale",
+                items = listOf(
+                    {
+                        SwitchSettingsRow(
+                            icon = Icons.Rounded.AspectRatio,
+                            title = "Auto Scale UI",
+                            subtitle = "Automatically calibrate UI dimensions and font scale to screen width",
+                            checked = settings.autoScaleUi,
+                            shape = MaterialShapes.Cookie7Sided,
+                            onCheckedChange = { enabled ->
+                                AppRepository.updateSettings { it.copy(autoScaleUi = enabled) }
+                            }
+                        )
+                    },
+                    {
+                        SliderSettingsRow(
+                            icon = Icons.Rounded.AspectRatio,
+                            title = "Interface Scale",
+                            value = settings.uiScalePercent,
+                            valueRange = 85..115,
+                            unitSuffix = "%",
+                            onValueChange = { pct ->
+                                AppRepository.updateSettings { it.copy(uiScalePercent = pct) }
+                            }
+                        )
+                    }
+                )
+            )
+        }
+
+        item {
+            SettingsGroup(
                 title = "AGSL Scroll Motion Blur",
                 items = listOf(
                     {
@@ -1123,9 +1231,11 @@ private fun GitHubNetworkSubPage(
     bottomPadding: Dp,
     onBack: () -> Unit
 ) {
+    val context = LocalContext.current
     var githubTokenInput by rememberSaveable(settings.githubPersonalAccessToken) {
         mutableStateOf(settings.githubPersonalAccessToken)
     }
+    var cacheBytes by remember { mutableStateOf(AppRepository.getApkCacheSizeBytes()) }
 
     LazyColumn(
         modifier = Modifier
@@ -1174,6 +1284,81 @@ private fun GitHubNetworkSubPage(
                                 AppRepository.updateSettings { it.copy(labGitHubMirrorAcceleration = enabled) }
                             }
                         )
+                    }
+                )
+            )
+        }
+
+        item {
+            SettingsGroup(
+                title = "Release & APK Preferences",
+                items = listOf(
+                    {
+                        SwitchSettingsRow(
+                            icon = Icons.Rounded.BugReport,
+                            title = "Exclude Debug APKs",
+                            subtitle = "Skip -debug.apk assets when selecting release binaries",
+                            checked = settings.excludeDebugApks,
+                            shape = MaterialShapes.Cookie6Sided,
+                            onCheckedChange = { enabled ->
+                                AppRepository.updateSettings { it.copy(excludeDebugApks = enabled) }
+                            }
+                        )
+                    },
+                    {
+                        SwitchSettingsRow(
+                            icon = Icons.Rounded.NewReleases,
+                            title = "Include Pre-releases by Default",
+                            subtitle = "Pre-select pre-release toggle when adding new apps",
+                            checked = settings.defaultIncludePrereleases,
+                            shape = MaterialShapes.Flower,
+                            onCheckedChange = { enabled ->
+                                AppRepository.updateSettings { it.copy(defaultIncludePrereleases = enabled) }
+                            }
+                        )
+                    },
+                    {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    val deleted = AppRepository.clearApkCache()
+                                    cacheBytes = AppRepository.getApkCacheSizeBytes()
+                                    Toast.makeText(
+                                        context,
+                                        if (deleted > 0) "Cleared $deleted cached APK(s)" else "APK cache is already empty",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                                .padding(horizontal = 18.dp, vertical = 15.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            ExpressiveShapeBadge(
+                                polygon = MaterialShapes.Clover4Leaf,
+                                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                                size = 40.dp
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.DeleteOutline,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Spacer(Modifier.width(16.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Clear Downloaded APK Cache",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Text(
+                                    text = "Used: ${Formatter.formatShortFileSize(context, cacheBytes)}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
                     }
                 )
             )
@@ -1323,6 +1508,7 @@ private fun AboutSubPage(
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
+    val appIconBitmap = rememberAppIconBitmap(context.packageName)
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -1343,13 +1529,32 @@ private fun AboutSubPage(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    ExpressiveShapeBadge(
-                        polygon = MaterialShapes.Cookie9Sided,
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary,
-                        size = 76.dp
-                    ) {
-                        Icon(Icons.Rounded.RocketLaunch, contentDescription = null, modifier = Modifier.size(36.dp))
+                    if (appIconBitmap != null) {
+                        Image(
+                            bitmap = appIconBitmap,
+                            contentDescription = "Obtainmond",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .size(76.dp)
+                                .clip(CircleShape)
+                        )
+                    } else {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.size(76.dp)
+                        ) {
+                            androidx.compose.foundation.layout.Box(
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "OB",
+                                    style = MaterialTheme.typography.headlineSmall,
+                                    fontWeight = FontWeight.Black
+                                )
+                            }
+                        }
                     }
                     Text("Obtainmond", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
                     Text(
@@ -1361,19 +1566,38 @@ private fun AboutSubPage(
                         text = "Direct Android app updater.",
                         style = MaterialTheme.typography.bodySmall
                     )
-                    OutlinedButton(
-                        onClick = {
-                            runCatching {
-                                context.startActivity(
-                                    Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/HmnDev-Tech/Obtainmond"))
-                                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                )
-                            }
-                        }
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("GitHub Repository")
+                        OutlinedButton(
+                            onClick = {
+                                runCatching {
+                                    context.startActivity(
+                                        Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/HmnDev-Tech/Obtainmond"))
+                                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    )
+                                }
+                            }
+                        ) {
+                            Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("GitHub")
+                        }
+                        ExpressiveButton(
+                            onClick = {
+                                runCatching {
+                                    context.startActivity(
+                                        Intent(Intent.ACTION_VIEW, Uri.parse("https://t.me/hmndevtech"))
+                                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    )
+                                }
+                            }
+                        ) {
+                            Icon(Icons.AutoMirrored.Rounded.Send, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Telegram @hmndevtech")
+                        }
                     }
                 }
             }

@@ -52,6 +52,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import io.obtainmond.data.repo.AppRepository
@@ -66,6 +67,7 @@ import io.obtainmond.ui.screens.AppsDashboardScreen
 import io.obtainmond.ui.screens.ObtainedLabsScreen
 import io.obtainmond.ui.screens.SettingsScreen
 import kotlinx.coroutines.launch
+import kotlin.math.absoluteValue
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -142,7 +144,9 @@ fun ObtainmondRootApp(sharedUrlFromIntent: String? = null) {
     ObtainmondExpressiveTheme(
         themeMode = settings.themeMode,
         dynamicColor = settings.dynamicColor,
-        pureBlack = settings.pureBlackOled
+        pureBlack = settings.pureBlackOled,
+        autoScaleUi = settings.autoScaleUi,
+        uiScalePercent = settings.uiScalePercent
     ) {
         val openedApp = apps.firstOrNull { it.id == openedAppId }
 
@@ -226,14 +230,22 @@ fun ObtainmondRootApp(sharedUrlFromIntent: String? = null) {
                             } else {
                                 ExpressiveFloatingNavigationBar(
                                     destinations = destinations,
-                                    selectedIndex = pagerState.currentPage,
+                                    selectedIndex = pagerState.targetPage,
                                     onSelect = { page ->
-                                        scope.launch { pagerState.animateScrollToPage(page) }
+                                        scope.launch {
+                                            pagerState.animateScrollToPage(
+                                                page = page,
+                                                animationSpec = spring(
+                                                    dampingRatio = Spring.DampingRatioNoBouncy,
+                                                    stiffness = Spring.StiffnessMediumLow
+                                                )
+                                            )
+                                        }
                                     },
-                                    fabIcon = if (pagerState.currentPage == 0) Icons.Rounded.Refresh else null,
+                                    fabIcon = if (pagerState.targetPage == 0) Icons.Rounded.Refresh else null,
                                     fabDescription = "Sync all apps",
                                     fabBusy = isRefreshingAll,
-                                    onFabClick = if (pagerState.currentPage == 0) ({ triggerSyncAll() }) else null
+                                    onFabClick = if (pagerState.targetPage == 0) ({ triggerSyncAll() }) else null
                                 )
                             }
                         }
@@ -241,6 +253,7 @@ fun ObtainmondRootApp(sharedUrlFromIntent: String? = null) {
                 ) { innerPadding ->
                     HorizontalPager(
                         state = pagerState,
+                        beyondViewportPageCount = 1,
                         modifier = Modifier
                             .fillMaxSize()
                             .scrollMotionBlur(
@@ -250,45 +263,79 @@ fun ObtainmondRootApp(sharedUrlFromIntent: String? = null) {
                                 strength = settings.motionBlurStrength
                             )
                     ) { page ->
-                        when (page) {
-                            0 -> AppsDashboardScreen(
-                                apps = apps,
-                                busyIds = busyIds,
-                                privStatus = privStatus,
-                                settings = settings,
-                                isRefreshingAll = isRefreshingAll,
-                                selectedAppIds = selectedAppIds,
-                                bottomPadding = innerPadding.calculateBottomPadding(),
-                                onOpenAppDetail = { id -> openedAppId = id },
-                                onToggleSelectApp = { id ->
-                                    selectedAppIds = if (id in selectedAppIds) {
-                                        selectedAppIds - id
-                                    } else {
-                                        selectedAppIds + id
+                        val pageOffset = (
+                            (pagerState.currentPage - page) + pagerState.currentPageOffsetFraction
+                        ).absoluteValue.coerceIn(0f, 1f)
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .graphicsLayer {
+                                    alpha = 1f - pageOffset * 0.22f
+                                    val s = 1f - pageOffset * 0.035f
+                                    scaleX = s
+                                    scaleY = s
+                                }
+                        ) {
+                            when (page) {
+                                0 -> AppsDashboardScreen(
+                                    apps = apps,
+                                    busyIds = busyIds,
+                                    privStatus = privStatus,
+                                    settings = settings,
+                                    isRefreshingAll = isRefreshingAll,
+                                    selectedAppIds = selectedAppIds,
+                                    bottomPadding = innerPadding.calculateBottomPadding(),
+                                    onOpenAppDetail = { id -> openedAppId = id },
+                                    onToggleSelectApp = { id ->
+                                        selectedAppIds = if (id in selectedAppIds) {
+                                            selectedAppIds - id
+                                        } else {
+                                            selectedAppIds + id
+                                        }
+                                    },
+                                    onSelectAll = { ids -> selectedAppIds = ids.toSet() },
+                                    onClearSelection = { selectedAppIds = emptySet() },
+                                    onRefreshAll = { triggerSyncAll() },
+                                    onJumpToAdd = {
+                                        scope.launch {
+                                            pagerState.animateScrollToPage(
+                                                page = 1,
+                                                animationSpec = spring(
+                                                    dampingRatio = Spring.DampingRatioNoBouncy,
+                                                    stiffness = Spring.StiffnessMediumLow
+                                                )
+                                            )
+                                        }
                                     }
-                                },
-                                onSelectAll = { ids -> selectedAppIds = ids.toSet() },
-                                onClearSelection = { selectedAppIds = emptySet() },
-                                onRefreshAll = { triggerSyncAll() },
-                                onJumpToAdd = { scope.launch { pagerState.animateScrollToPage(1) } }
-                            )
-                            1 -> AddAppScreen(
-                                initialSharedUrl = sharedUrlFromIntent.orEmpty(),
-                                settings = settings,
-                                bottomPadding = innerPadding.calculateBottomPadding(),
-                                onAdded = { scope.launch { pagerState.animateScrollToPage(0) } }
-                            )
-                            2 -> ObtainedLabsScreen(
-                                apps = apps,
-                                privStatus = privStatus,
-                                settings = settings,
-                                bottomPadding = innerPadding.calculateBottomPadding()
-                            )
-                            3 -> SettingsScreen(
-                                settings = settings,
-                                privStatus = privStatus,
-                                bottomPadding = innerPadding.calculateBottomPadding()
-                            )
+                                )
+                                1 -> AddAppScreen(
+                                    initialSharedUrl = sharedUrlFromIntent.orEmpty(),
+                                    settings = settings,
+                                    bottomPadding = innerPadding.calculateBottomPadding(),
+                                    onAdded = {
+                                        scope.launch {
+                                            pagerState.animateScrollToPage(
+                                                page = 0,
+                                                animationSpec = spring(
+                                                    dampingRatio = Spring.DampingRatioNoBouncy,
+                                                    stiffness = Spring.StiffnessMediumLow
+                                                )
+                                            )
+                                        }
+                                    }
+                                )
+                                2 -> ObtainedLabsScreen(
+                                    apps = apps,
+                                    privStatus = privStatus,
+                                    settings = settings,
+                                    bottomPadding = innerPadding.calculateBottomPadding()
+                                )
+                                3 -> SettingsScreen(
+                                    settings = settings,
+                                    privStatus = privStatus,
+                                    bottomPadding = innerPadding.calculateBottomPadding()
+                                )
+                            }
                         }
                     }
                 }

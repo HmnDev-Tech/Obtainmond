@@ -19,6 +19,17 @@ pub struct VersionComparisonResult {
 }
 
 const COSMETIC_SUFFIXES: &[&str] = &[
+    "-rust",
+    "_rust",
+    "-foss",
+    "_foss",
+    "-standard",
+    "-full",
+    "-lite",
+    "-official",
+    "-prod",
+    "-normal",
+    "-ndk",
     "-release",
     "-debug",
     "-signed",
@@ -31,7 +42,6 @@ const COSMETIC_SUFFIXES: &[&str] = &[
     "-aarch64",
     "-armv7",
     "-fdroid",
-    "-foss",
     "-gms",
     "-play",
     "-github",
@@ -41,14 +51,54 @@ const COSMETIC_SUFFIXES: &[&str] = &[
     "_universal",
 ];
 
+fn is_hex_hash(slice: &str, min_len: usize, allow_all_digits: bool) -> bool {
+    if slice.len() < min_len || slice.len() > 40 {
+        return false;
+    }
+    if !slice.chars().all(|c| c.is_ascii_hexdigit()) {
+        return false;
+    }
+    allow_all_digits || slice.chars().any(|c| matches!(c, 'a'..='f' | 'A'..='F'))
+}
+
+fn strip_git_hash_suffix(input: &str) -> String {
+    let mut s = input.to_string();
+    if let Some(last_dot) = s.rfind('.') {
+        let hash_part = &s[last_dot + 1..];
+        if is_hex_hash(hash_part, 6, true) {
+            let prefix = &s[..last_dot];
+            if let Some(r_dot) = prefix.rfind(".r") {
+                let rev_part = &prefix[r_dot + 2..];
+                if !rev_part.is_empty() && rev_part.chars().all(|c| c.is_ascii_digit()) {
+                    return format!("{}-r{}", &prefix[..r_dot], rev_part);
+                }
+            }
+        }
+    }
+    if let Some(sep_idx) = s.rfind(|c| c == '.' || c == '-') {
+        let tail = &s[sep_idx + 1..];
+        let (candidate, has_g) = if let Some(stripped) = tail.strip_prefix('g') {
+            (stripped, true)
+        } else {
+            (tail, false)
+        };
+        if sep_idx > 0 && is_hex_hash(candidate, 7, has_g) {
+            s.truncate(sep_idx);
+        }
+    }
+    s
+}
+
 pub fn normalize_version(raw: &str) -> String {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return String::new();
     }
 
+    let without_paren = trimmed.split('(').next().unwrap_or(trimmed).trim();
+
     // Strip build metadata (+...)
-    let without_build = trimmed.split('+').next().unwrap_or(trimmed).trim();
+    let without_build = without_paren.split('+').next().unwrap_or(without_paren).trim();
 
     // Strip common leading prefixes: v, V, release-, ver-, version-
     let mut s = without_build.to_string();
@@ -70,6 +120,11 @@ pub fn normalize_version(raw: &str) -> String {
 
     // Strip cosmetic suffixes repeatedly
     loop {
+        let with_hash_stripped = strip_git_hash_suffix(&s);
+        if with_hash_stripped != s {
+            s = with_hash_stripped;
+            continue;
+        }
         let cur_lower = s.to_ascii_lowercase();
         let mut stripped = false;
         for suffix in COSMETIC_SUFFIXES {
@@ -151,6 +206,34 @@ fn tokenize(ver: &str) -> Vec<Token> {
     tokens
 }
 
+fn split_leading_nums(tokens: &[Token]) -> (Vec<u64>, &[Token]) {
+    let mut split_idx = 0;
+    let mut nums = Vec::new();
+    for tok in tokens {
+        match tok {
+            Token::Num(n) => {
+                nums.push(*n);
+                split_idx += 1;
+            }
+            _ => break,
+        }
+    }
+    while nums.len() > 1 && nums.last() == Some(&0) {
+        nums.pop();
+    }
+    (nums, &tokens[split_idx..])
+}
+
+fn max_rem_num(tokens: &[Token]) -> Option<u64> {
+    tokens
+        .iter()
+        .filter_map(|t| match t {
+            Token::Num(n) => Some(*n),
+            _ => None,
+        })
+        .max()
+}
+
 pub fn compare_versions(installed: &str, remote: &str) -> Ordering {
     let norm_a = normalize_version(installed);
     let norm_b = normalize_version(remote);
@@ -166,6 +249,24 @@ pub fn compare_versions(installed: &str, remote: &str) -> Ordering {
 
     let tok_a = tokenize(&norm_a);
     let tok_b = tokenize(&norm_b);
+
+    let (nums_a, rem_a) = split_leading_nums(&tok_a);
+    let (nums_b, rem_b) = split_leading_nums(&tok_b);
+    if !nums_a.is_empty() && nums_a == nums_b {
+        let has_pre_a = rem_a.iter().any(|t| matches!(t, Token::PreRelease(_)));
+        let has_pre_b = rem_b.iter().any(|t| matches!(t, Token::PreRelease(_)));
+        if !has_pre_a && !has_pre_b {
+            let num_a = max_rem_num(rem_a);
+            let num_b = max_rem_num(rem_b);
+            if num_a == num_b {
+                return Ordering::Equal;
+            }
+            if !rem_a.is_empty() && rem_b.is_empty() {
+                return Ordering::Equal;
+            }
+        }
+    }
+
     let max_len = tok_a.len().max(tok_b.len());
 
     for i in 0..max_len {

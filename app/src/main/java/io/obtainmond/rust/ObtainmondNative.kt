@@ -151,11 +151,95 @@ object ObtainmondNative {
         }
     }
 
+    private val preReleaseTagRegex = Regex(
+        """(?:alpha|beta|rc|pre|preview|dev|nightly|canary)""",
+        RegexOption.IGNORE_CASE
+    )
+
     fun safeNormalizeVersion(raw: String, regexPattern: String = ""): String {
-        if (isLoaded) {
-            runCatching { return normalizeVersion(raw, regexPattern) }
+        val base = raw.trim()
+        val preCleaned = if (regexPattern.isBlank()) {
+            base.substringBefore("(").substringBefore("+").trim()
+        } else {
+            base
         }
-        return raw.trim().removePrefix("v").removePrefix("V")
+        if (isLoaded) {
+            runCatching {
+                val res = normalizeVersion(preCleaned, regexPattern)
+                if (res.isNotBlank()) return res
+            }
+        }
+        var s = base.substringBefore("(").substringBefore("+").trim()
+        val lower = s.lowercase()
+        for (prefix in listOf("release-", "version-", "ver-", "rel-", "v.", "v")) {
+            if (lower.startsWith(prefix) && s.length > prefix.length && s[prefix.length].isDigit()) {
+                s = s.substring(prefix.length)
+                break
+            }
+        }
+        val suffixes = listOf(
+            "-rust", "_rust", "-release", "_release", "-universal", "_universal",
+            "-foss", "_foss", "-fdroid", "-gms", "-signed", "_signed",
+            "-arm64-v8a", "-armeabi-v7a", "-x86_64", "-x86"
+        )
+        while (true) {
+            val cur = s.lowercase()
+            val hit = suffixes.firstOrNull { cur.endsWith(it) && s.length > it.length } ?: break
+            s = s.substring(0, s.length - hit.length)
+        }
+        return s.trim('-', '_', '.', ' ')
+    }
+
+    private fun extractLeadingNumericParts(version: String): Pair<List<Long>, String> {
+        val norm = safeNormalizeVersion(version)
+        val nums = mutableListOf<Long>()
+        var idx = 0
+        while (idx < norm.length) {
+            if (norm[idx].isDigit()) {
+                val start = idx
+                while (idx < norm.length && norm[idx].isDigit()) idx++
+                norm.substring(start, idx).toLongOrNull()?.let { nums.add(it) }
+                if (idx < norm.length && (norm[idx] == '.' || norm[idx] == '_' || norm[idx] == '-')) {
+                    if (idx + 1 < norm.length && norm[idx + 1].isDigit()) {
+                        idx++
+                        continue
+                    }
+                }
+                break
+            } else {
+                break
+            }
+        }
+        while (nums.size > 1 && nums.last() == 0L) {
+            nums.removeAt(nums.lastIndex)
+        }
+        val remainder = if (idx <= norm.length) norm.substring(idx).trim('-', '_', '.', ' ') else ""
+        return nums to remainder
+    }
+
+    fun areVersionsEquivalent(installed: String, remote: String): Boolean {
+        val rawA = installed.trim()
+        val rawB = remote.trim()
+        if (rawA.isBlank() || rawB.isBlank()) return false
+        if (rawA.equals(rawB, ignoreCase = true)) return true
+
+        val normA = safeNormalizeVersion(rawA)
+        val normB = safeNormalizeVersion(rawB)
+        if (normA.isNotBlank() && normA.equals(normB, ignoreCase = true)) return true
+
+        val (numsA, remA) = extractLeadingNumericParts(normA)
+        val (numsB, remB) = extractLeadingNumericParts(normB)
+        if (numsA.isNotEmpty() && numsA == numsB) {
+            val hasPreA = preReleaseTagRegex.containsMatchIn(remA)
+            val hasPreB = preReleaseTagRegex.containsMatchIn(remB)
+            if (!hasPreA && !hasPreB) {
+                val remNumsA = Regex("""\d+""").findAll(remA).mapNotNull { it.value.toLongOrNull() }.maxOrNull()
+                val remNumsB = Regex("""\d+""").findAll(remB).mapNotNull { it.value.toLongOrNull() }.maxOrNull()
+                if (remNumsA == remNumsB) return true
+                if (remA.isNotEmpty() && remB.isEmpty()) return true
+            }
+        }
+        return false
     }
 
     fun safeIsUpdateAvailable(
@@ -163,12 +247,29 @@ object ObtainmondNative {
         remote: String,
         allowDowngrade: Boolean = false
     ): Boolean {
+        if (installed.isBlank() || remote.isBlank()) return false
+        if (!allowDowngrade && areVersionsEquivalent(installed, remote)) return false
         if (isLoaded) {
             runCatching { return isUpdateAvailable(installed, remote, allowDowngrade) }
         }
+        val (numsA, remA) = extractLeadingNumericParts(installed)
+        val (numsB, remB) = extractLeadingNumericParts(remote)
+        if (numsA.isNotEmpty() && numsB.isNotEmpty()) {
+            val max = maxOf(numsA.size, numsB.size)
+            for (i in 0 until max) {
+                val va = numsA.getOrElse(i) { 0L }
+                val vb = numsB.getOrElse(i) { 0L }
+                if (va != vb) return if (allowDowngrade) true else vb > va
+            }
+            val preA = preReleaseTagRegex.containsMatchIn(remA)
+            val preB = preReleaseTagRegex.containsMatchIn(remB)
+            if (preA && !preB) return true
+            if (!preA && preB) return allowDowngrade
+            return false
+        }
         val a = safeNormalizeVersion(installed)
         val b = safeNormalizeVersion(remote)
-        return a.isNotEmpty() && b.isNotEmpty() && a != b
+        return a.isNotEmpty() && b.isNotEmpty() && !a.equals(b, ignoreCase = true)
     }
 
     fun selectBestApkForDevice(

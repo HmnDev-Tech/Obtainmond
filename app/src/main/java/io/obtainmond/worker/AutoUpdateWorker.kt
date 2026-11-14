@@ -4,6 +4,8 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
 import android.content.pm.ServiceInfo
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.work.Constraints
@@ -72,6 +74,10 @@ class AutoUpdateWorker(
             return Result.success()
         }
 
+        if (settings.wifiOnlyBackgroundUpdates && !isUnmeteredNetworkAvailable()) {
+            return Result.retry()
+        }
+
         return runCatching {
             AppRepository.refreshAllAndAutoUpdate(
                 autoInstallUpdates = true,
@@ -83,14 +89,23 @@ class AutoUpdateWorker(
         }
     }
 
+    private fun isUnmeteredNetworkAvailable(): Boolean {
+        val cm = applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            ?: return false
+        val network = cm.activeNetwork ?: return false
+        val caps = cm.getNetworkCapabilities(network) ?: return false
+        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+    }
+
     companion object {
         private const val PERIODIC_WORK_NAME = "obtainmond_zero_touch_periodic_updater"
         private const val IMMEDIATE_WORK_NAME = "obtainmond_zero_touch_immediate_updater"
 
-        fun schedulePeriodic(context: Context, intervalMinutes: Int = 30) {
+        fun schedulePeriodic(context: Context, intervalMinutes: Int = 30, wifiOnly: Boolean = false) {
             val coercedMinutes = intervalMinutes.coerceAtLeast(15).toLong()
             val constraints = Constraints.Builder()
-                .setRequiredNetworkType(NetworkType.CONNECTED)
+                .setRequiredNetworkType(if (wifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED)
                 .build()
 
             val request = PeriodicWorkRequestBuilder<AutoUpdateWorker>(

@@ -107,7 +107,9 @@ fun AddAppScreen(
     var apkRegexFilter by rememberSaveable { mutableStateOf("") }
     var versionRegex by rememberSaveable { mutableStateOf("") }
     var categoryInput by rememberSaveable { mutableStateOf("") }
-    var includePrereleases by rememberSaveable { mutableStateOf(false) }
+    var includePrereleases by rememberSaveable(settings.defaultIncludePrereleases) {
+        mutableStateOf(settings.defaultIncludePrereleases)
+    }
     var silentAutoUpdate by rememberSaveable { mutableStateOf(true) }
     var trackOnly by rememberSaveable { mutableStateOf(false) }
     var installImmediately by rememberSaveable { mutableStateOf(true) }

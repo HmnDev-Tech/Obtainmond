@@ -82,6 +82,7 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.toPath
 import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
@@ -103,7 +104,9 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -130,12 +133,18 @@ data class ExpressiveNavDestination(
 private val appIconCache = ConcurrentHashMap<String, ImageBitmap>()
 
 private fun drawableToBitmap(drawable: Drawable): Bitmap {
-    if (drawable is BitmapDrawable && drawable.bitmap != null) {
+    if (
+        drawable is BitmapDrawable &&
+        drawable.bitmap != null &&
+        drawable.bitmap.width == drawable.bitmap.height &&
+        drawable.bitmap.width >= 96
+    ) {
         return drawable.bitmap
     }
-    val w = drawable.intrinsicWidth.coerceIn(64, 256)
-    val h = drawable.intrinsicHeight.coerceIn(64, 256)
-    val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+    val w = if (drawable.intrinsicWidth > 0) drawable.intrinsicWidth.coerceIn(128, 256) else 192
+    val h = if (drawable.intrinsicHeight > 0) drawable.intrinsicHeight.coerceIn(128, 256) else 192
+    val size = maxOf(w, h)
+    val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
     drawable.setBounds(0, 0, canvas.width, canvas.height)
     drawable.draw(canvas)
@@ -194,9 +203,27 @@ fun ObtainmondExpressiveTheme(
     themeMode: Int = 0,
     dynamicColor: Boolean = true,
     pureBlack: Boolean = false,
+    autoScaleUi: Boolean = true,
+    uiScalePercent: Int = 100,
     content: @Composable () -> Unit
 ) {
     val context = LocalContext.current
+    val configuration = LocalConfiguration.current
+    val baseDensity = LocalDensity.current
+    val userScaleFactor = uiScalePercent.coerceIn(80, 120) / 100f
+    val screenWidthPx = configuration.screenWidthDp * baseDensity.density
+    val effectiveDensity = if (autoScaleUi && screenWidthPx > 0f) {
+        val targetWidthDp = if (configuration.smallestScreenWidthDp >= 600) 760f else 412f
+        val calibrated = (screenWidthPx / targetWidthDp).coerceIn(
+            baseDensity.density * 0.75f,
+            baseDensity.density * 1.25f
+        )
+        calibrated * userScaleFactor
+    } else {
+        baseDensity.density * userScaleFactor
+    }
+    val effectiveFontScale = if (autoScaleUi) 1.0f else baseDensity.fontScale
+
     val darkTheme = when (themeMode) {
         1 -> false
         2 -> true
@@ -245,11 +272,15 @@ fun ObtainmondExpressiveTheme(
         }
     }
 
-    MaterialExpressiveTheme(
-        colorScheme = colorScheme,
-        motionScheme = MotionScheme.expressive(),
-        content = content
-    )
+    CompositionLocalProvider(
+        LocalDensity provides Density(density = effectiveDensity, fontScale = effectiveFontScale)
+    ) {
+        MaterialExpressiveTheme(
+            colorScheme = colorScheme,
+            motionScheme = MotionScheme.expressive(),
+            content = content
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
@@ -266,22 +297,6 @@ fun ExpressiveAppAvatar(
 ) {
     val iconBitmap = rememberAppIconBitmap(packageId)
 
-    val idlePolygon = MaterialShapes.Square
-    val targetPolygon = when {
-        isSelected -> MaterialShapes.Cookie9Sided
-        isFrozen -> MaterialShapes.Diamond
-        hasUpdate -> MaterialShapes.Cookie7Sided
-        else -> MaterialShapes.Clover4Leaf
-    }
-    val morph = remember(targetPolygon) { Morph(idlePolygon, targetPolygon) }
-    val morphProgress by animateFloatAsState(
-        targetValue = 1f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessMediumLow
-        ),
-        label = "avatarMorph"
-    )
     val avatarScale by animateFloatAsState(
         targetValue = if (isSelected) 0.92f else 1f,
         animationSpec = spring(
@@ -295,17 +310,14 @@ fun ExpressiveAppAvatar(
         targetValue = when {
             isSelected -> MaterialTheme.colorScheme.primary
             isFrozen -> MaterialTheme.colorScheme.errorContainer
+            isBusy -> MaterialTheme.colorScheme.primaryContainer
+            iconBitmap != null -> Color.Transparent
             hasUpdate -> MaterialTheme.colorScheme.primaryContainer
-            iconBitmap != null -> MaterialTheme.colorScheme.surfaceContainerHigh
             else -> MaterialTheme.colorScheme.secondaryContainer
         },
         animationSpec = tween(240),
         label = "avatarBg"
     )
-
-    val shape = remember(morph, morphProgress) {
-        MorphingPolygonShape(morph, morphProgress)
-    }
 
     val infiniteTransition = rememberInfiniteTransition(label = "updateSpin")
     val badgeSpin by infiniteTransition.animateFloat(
@@ -330,7 +342,7 @@ fun ExpressiveAppAvatar(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .clip(shape)
+                .clip(CircleShape)
                 .background(containerBg),
             contentAlignment = Alignment.Center
         ) {
@@ -357,6 +369,7 @@ fun ExpressiveAppAvatar(
                         contentScale = ContentScale.Crop,
                         modifier = Modifier
                             .fillMaxSize()
+                            .clip(CircleShape)
                             .alpha(if (isFrozen) 0.45f else 1f)
                     )
                 }
@@ -512,6 +525,16 @@ fun ExpressiveFloatingNavigationBar(
     onFabClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
+    var lastFabIcon by remember { mutableStateOf(fabIcon) }
+    var lastFabDesc by remember { mutableStateOf(fabDescription) }
+    var lastOnFabClick by remember { mutableStateOf(onFabClick) }
+    if (fabIcon != null && onFabClick != null) {
+        lastFabIcon = fabIcon
+        lastFabDesc = fabDescription
+        lastOnFabClick = onFabClick
+    }
+    val showFab = fabIcon != null && onFabClick != null
+
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -519,52 +542,70 @@ fun ExpressiveFloatingNavigationBar(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         contentAlignment = Alignment.Center
     ) {
-        val fabContent: (@Composable () -> Unit)? = if (fabIcon != null && onFabClick != null) {
-            {
-                FloatingToolbarDefaults.VibrantFloatingActionButton(
-                    onClick = onFabClick,
-                    shape = MaterialShapes.Cookie9Sided.toShape(),
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary
-                ) {
-                    if (fabBusy) {
-                        ContainedLoadingIndicator(
-                            modifier = Modifier.size(28.dp),
-                            containerColor = MaterialTheme.colorScheme.primaryContainer,
-                            indicatorColor = MaterialTheme.colorScheme.primary
-                        )
-                    } else {
-                        Icon(
-                            imageVector = fabIcon,
-                            contentDescription = fabDescription
-                        )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.animateContentSize(
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioLowBouncy,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            )
+        ) {
+            HorizontalFloatingToolbar(
+                expanded = true,
+                colors = FloatingToolbarDefaults.vibrantFloatingToolbarColors(
+                    toolbarContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    toolbarContentColor = MaterialTheme.colorScheme.onSurface
+                )
+            ) {
+                NavDestinationItems(destinations, selectedIndex, onSelect)
+            }
+
+            AnimatedVisibility(
+                visible = showFab,
+                enter = expandHorizontally(
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioLowBouncy,
+                        stiffness = Spring.StiffnessMediumLow
+                    )
+                ) + scaleIn(
+                    initialScale = 0.8f,
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioLowBouncy,
+                        stiffness = Spring.StiffnessMediumLow
+                    )
+                ) + fadeIn(tween(180)),
+                exit = shrinkHorizontally(
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioNoBouncy,
+                        stiffness = Spring.StiffnessMediumLow
+                    )
+                ) + scaleOut(targetScale = 0.8f) + fadeOut(tween(130))
+            ) {
+                val iconToShow = lastFabIcon
+                val clickAction = lastOnFabClick
+                if (iconToShow != null && clickAction != null) {
+                    FloatingToolbarDefaults.VibrantFloatingActionButton(
+                        onClick = clickAction,
+                        shape = MaterialShapes.Cookie9Sided.toShape(),
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    ) {
+                        if (fabBusy) {
+                            ContainedLoadingIndicator(
+                                modifier = Modifier.size(28.dp),
+                                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                indicatorColor = MaterialTheme.colorScheme.primary
+                            )
+                        } else {
+                            Icon(
+                                imageVector = iconToShow,
+                                contentDescription = lastFabDesc
+                            )
+                        }
                     }
                 }
-            }
-        } else {
-            null
-        }
-
-        if (fabContent != null) {
-            HorizontalFloatingToolbar(
-                expanded = true,
-                floatingActionButton = fabContent,
-                colors = FloatingToolbarDefaults.vibrantFloatingToolbarColors(
-                    toolbarContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    toolbarContentColor = MaterialTheme.colorScheme.onSurface
-                )
-            ) {
-                NavDestinationItems(destinations, selectedIndex, onSelect)
-            }
-        } else {
-            HorizontalFloatingToolbar(
-                expanded = true,
-                colors = FloatingToolbarDefaults.vibrantFloatingToolbarColors(
-                    toolbarContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    toolbarContentColor = MaterialTheme.colorScheme.onSurface
-                )
-            ) {
-                NavDestinationItems(destinations, selectedIndex, onSelect)
             }
         }
     }
