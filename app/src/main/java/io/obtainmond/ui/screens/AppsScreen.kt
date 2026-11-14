@@ -77,6 +77,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TonalToggleButton
 import androidx.compose.material3.ToggleButtonDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -206,6 +207,8 @@ fun AppsDashboardScreen(
         sourceFilter != "All",
         categoryFilter != "All"
     ).count { it }
+
+    val outlineFallback = MaterialTheme.colorScheme.outline
 
     LazyColumn(
         state = listState,
@@ -530,7 +533,7 @@ fun AppsDashboardScreen(
                 val isCollapsed = categoryName in collapsedCategories
                 val catColor = categoryAccentColor(
                     if (categoryName == "Uncategorized") "" else categoryName,
-                    MaterialTheme.colorScheme.outline
+                    outlineFallback
                 )
                 item(key = "header_$categoryName") {
                     CategorySectionHeader(

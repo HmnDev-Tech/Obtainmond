@@ -1130,6 +1130,7 @@ private fun ImportExportSubPage(
     }
 }
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun GitHubNetworkSubPage(
     settings: ObtainmondSettings,

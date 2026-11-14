@@ -14,6 +14,7 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
@@ -165,6 +166,7 @@ fun rememberAppIconBitmap(packageId: String): ImageBitmap? {
     return state.value
 }
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 class MorphingPolygonShape(
     private val morph: Morph,
     private val progress: Float,
@@ -442,7 +444,6 @@ fun ExpressiveShapeBadge(
     }
 }
 
-@Composable
 fun categoryAccentColor(category: String, fallbackColor: Color): Color {
     if (category.isBlank()) return fallbackColor
     val palette = listOf(
