@@ -66,7 +66,6 @@ import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Restore
-import androidx.compose.material.icons.rounded.RocketLaunch
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Speed
@@ -82,7 +81,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
@@ -172,7 +170,7 @@ fun ObtainedLabsScreen(
         item {
             Text(
                 text = "Labs",
-                style = MaterialTheme.typography.displaySmall,
+                style = MaterialTheme.typography.headlineLarge,
                 fontWeight = FontWeight.Black,
                 letterSpacing = (-0.5).sp
             )
@@ -712,7 +710,7 @@ private fun SettingsRootPage(
         item {
             Text(
                 text = "Settings",
-                style = MaterialTheme.typography.displaySmall,
+                style = MaterialTheme.typography.headlineLarge,
                 fontWeight = FontWeight.Black,
                 letterSpacing = (-0.5).sp
             )
@@ -823,8 +821,8 @@ private fun SubPageHeader(title: String, onBack: () -> Unit) {
         Spacer(Modifier.width(6.dp))
         Text(
             text = title,
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Black
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.ExtraBold
         )
     }
 }
@@ -1275,7 +1273,7 @@ private fun GitHubNetworkSubPage(
                 items = listOf(
                     {
                         SwitchSettingsRow(
-                            icon = Icons.Rounded.RocketLaunch,
+                            icon = Icons.Rounded.Bolt,
                             title = "GitHub Mirror Acceleration",
                             subtitle = "Routes release APK downloads via mirror when throttled",
                             checked = settings.labGitHubMirrorAcceleration,
@@ -1400,8 +1398,8 @@ private fun AuditLogsSubPage(
                     Spacer(Modifier.width(6.dp))
                     Text(
                         text = "Logs (${logs.size})",
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Black
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.ExtraBold
                     )
                 }
                 if (logs.isNotEmpty()) {
@@ -1558,7 +1556,7 @@ private fun AboutSubPage(
                     }
                     Text("Obtainmond", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
                     Text(
-                        text = "v${BuildConfig.VERSION_NAME}",
+                        text = "v${BuildConfig.VERSION_NAME.removeSuffix("-rust")}",
                         style = MaterialTheme.typography.labelLarge,
                         fontFamily = FontFamily.Monospace
                     )
@@ -1566,11 +1564,18 @@ private fun AboutSubPage(
                         text = "Direct Android app updater.",
                         style = MaterialTheme.typography.bodySmall
                     )
+                    Text(
+                        text = "@hmndevtech",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                    )
                     Row(
+                        modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        OutlinedButton(
+                        ExpressiveTonalButton(
                             onClick = {
                                 runCatching {
                                     context.startActivity(
@@ -1578,11 +1583,15 @@ private fun AboutSubPage(
                                             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                                     )
                                 }
-                            }
+                            },
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(46.dp)
                         ) {
                             Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text("GitHub")
+                            Text("GitHub", maxLines = 1)
                         }
                         ExpressiveButton(
                             onClick = {
@@ -1592,11 +1601,15 @@ private fun AboutSubPage(
                                             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                                     )
                                 }
-                            }
+                            },
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(46.dp)
                         ) {
                             Icon(Icons.AutoMirrored.Rounded.Send, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text("Telegram @hmndevtech")
+                            Text("Telegram", maxLines = 1)
                         }
                     }
                 }

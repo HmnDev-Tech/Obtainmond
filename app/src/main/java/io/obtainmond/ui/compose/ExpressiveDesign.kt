@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.drawable.AdaptiveIconDrawable
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.os.Build
@@ -49,6 +50,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -133,6 +135,21 @@ data class ExpressiveNavDestination(
 private val appIconCache = ConcurrentHashMap<String, ImageBitmap>()
 
 private fun drawableToBitmap(drawable: Drawable): Bitmap {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && drawable is AdaptiveIconDrawable) {
+        val size = 256
+        val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        val inset = (size * 0.175f).toInt()
+        drawable.background?.apply {
+            setBounds(-inset, -inset, size + inset, size + inset)
+            draw(canvas)
+        }
+        drawable.foreground?.apply {
+            setBounds(-inset, -inset, size + inset, size + inset)
+            draw(canvas)
+        }
+        return bitmap
+    }
     if (
         drawable is BitmapDrawable &&
         drawable.bitmap != null &&
@@ -141,9 +158,8 @@ private fun drawableToBitmap(drawable: Drawable): Bitmap {
     ) {
         return drawable.bitmap
     }
-    val w = if (drawable.intrinsicWidth > 0) drawable.intrinsicWidth.coerceIn(128, 256) else 192
-    val h = if (drawable.intrinsicHeight > 0) drawable.intrinsicHeight.coerceIn(128, 256) else 192
-    val size = maxOf(w, h)
+    val maxIntrinsic = maxOf(drawable.intrinsicWidth, drawable.intrinsicHeight)
+    val size = if (maxIntrinsic > 0) maxIntrinsic.coerceIn(192, 384) else 256
     val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
     drawable.setBounds(0, 0, canvas.width, canvas.height)
@@ -213,7 +229,7 @@ fun ObtainmondExpressiveTheme(
     val userScaleFactor = uiScalePercent.coerceIn(80, 120) / 100f
     val screenWidthPx = configuration.screenWidthDp * baseDensity.density
     val effectiveDensity = if (autoScaleUi && screenWidthPx > 0f) {
-        val targetWidthDp = if (configuration.smallestScreenWidthDp >= 600) 760f else 412f
+        val targetWidthDp = if (configuration.smallestScreenWidthDp >= 600) 760f else 428f
         val calibrated = (screenWidthPx / targetWidthDp).coerceIn(
             baseDensity.density * 0.75f,
             baseDensity.density * 1.25f
@@ -222,7 +238,11 @@ fun ObtainmondExpressiveTheme(
     } else {
         baseDensity.density * userScaleFactor
     }
-    val effectiveFontScale = if (autoScaleUi) 1.0f else baseDensity.fontScale
+    val effectiveFontScale = if (autoScaleUi) {
+        (0.95f * userScaleFactor).coerceIn(0.82f, 1.10f)
+    } else {
+        baseDensity.fontScale
+    }
 
     val darkTheme = when (themeMode) {
         1 -> false
@@ -538,6 +558,7 @@ fun ExpressiveFloatingNavigationBar(
     Box(
         modifier = modifier
             .fillMaxWidth()
+            .wrapContentHeight()
             .navigationBarsPadding()
             .padding(horizontal = 16.dp, vertical = 12.dp),
         contentAlignment = Alignment.Center
@@ -545,12 +566,14 @@ fun ExpressiveFloatingNavigationBar(
         Row(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.animateContentSize(
-                animationSpec = spring(
-                    dampingRatio = Spring.DampingRatioLowBouncy,
-                    stiffness = Spring.StiffnessMediumLow
+            modifier = Modifier
+                .wrapContentHeight()
+                .animateContentSize(
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioLowBouncy,
+                        stiffness = Spring.StiffnessMediumLow
+                    )
                 )
-            )
         ) {
             HorizontalFloatingToolbar(
                 expanded = true,
@@ -586,23 +609,31 @@ fun ExpressiveFloatingNavigationBar(
                 val iconToShow = lastFabIcon
                 val clickAction = lastOnFabClick
                 if (iconToShow != null && clickAction != null) {
-                    FloatingToolbarDefaults.VibrantFloatingActionButton(
+                    Surface(
                         onClick = clickAction,
-                        shape = MaterialShapes.Cookie9Sided.toShape(),
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                        shadowElevation = 4.dp,
+                        modifier = Modifier.size(52.dp)
                     ) {
-                        if (fabBusy) {
-                            ContainedLoadingIndicator(
-                                modifier = Modifier.size(28.dp),
-                                containerColor = MaterialTheme.colorScheme.primaryContainer,
-                                indicatorColor = MaterialTheme.colorScheme.primary
-                            )
-                        } else {
-                            Icon(
-                                imageVector = iconToShow,
-                                contentDescription = lastFabDesc
-                            )
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (fabBusy) {
+                                ContainedLoadingIndicator(
+                                    modifier = Modifier.size(26.dp),
+                                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                    indicatorColor = MaterialTheme.colorScheme.primary
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = iconToShow,
+                                    contentDescription = lastFabDesc,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -927,27 +958,29 @@ fun NavigationSettingsRow(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 18.dp, vertical = 16.dp),
+            .padding(horizontal = 14.dp, vertical = 13.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         ExpressiveShapeBadge(
             polygon = shape,
             containerColor = iconContainerColor,
             contentColor = iconTint,
-            size = 42.dp
+            size = 38.dp
         ) {
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                modifier = Modifier.size(20.dp)
+                modifier = Modifier.size(19.dp)
             )
         }
-        Spacer(Modifier.width(16.dp))
+        Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = title,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
             if (!subtitle.isNullOrBlank()) {
                 Spacer(Modifier.height(2.dp))
@@ -998,7 +1031,7 @@ fun SwitchSettingsRow(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onCheckedChange(!checked) }
-            .padding(horizontal = 18.dp, vertical = 15.dp),
+            .padding(horizontal = 14.dp, vertical = 13.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         ExpressiveShapeBadge(
@@ -1013,27 +1046,31 @@ fun SwitchSettingsRow(
             } else {
                 MaterialTheme.colorScheme.onSecondaryContainer
             },
-            size = 40.dp
+            size = 38.dp
         ) {
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                modifier = Modifier.size(20.dp)
+                modifier = Modifier.size(19.dp)
             )
         }
-        Spacer(Modifier.width(16.dp))
+        Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = title,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Medium
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
             if (!subtitle.isNullOrBlank()) {
                 Spacer(Modifier.height(2.dp))
                 Text(
                     text = subtitle,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
         }

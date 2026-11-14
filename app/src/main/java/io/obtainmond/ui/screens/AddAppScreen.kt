@@ -33,11 +33,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.AddCircle
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.Link
-import androidx.compose.material.icons.rounded.RocketLaunch
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.ContainedLoadingIndicator
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -143,7 +143,7 @@ fun AddAppScreen(
             Column {
                 Text(
                     text = "Add App",
-                    style = MaterialTheme.typography.displaySmall,
+                    style = MaterialTheme.typography.headlineLarge,
                     fontWeight = FontWeight.Black,
                     letterSpacing = (-0.5).sp
                 )
@@ -154,7 +154,7 @@ fun AddAppScreen(
                 ) {
                     SUPPORTED_SOURCES.forEach { src ->
                         Surface(
-                            shape = MaterialShapes.Pill.toShape(),
+                            shape = CircleShape,
                             color = MaterialTheme.colorScheme.surfaceContainerHigh
                         ) {
                             Text(
@@ -290,13 +290,18 @@ fun AddAppScreen(
                         ) {
                             Icon(Icons.Rounded.Tune, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text(if (showAdvanced) "Hide Source Options" else "Source Options")
+                            Text(if (showAdvanced) "Hide Options" else "Source Options", maxLines = 1)
                         }
-                        Text(
-                            text = if (silentAutoUpdate) "Silent Auto-Update" else "Manual",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        TonalToggleButton(
+                            checked = silentAutoUpdate,
+                            onCheckedChange = { silentAutoUpdate = it },
+                            shapes = ToggleButtonDefaults.shapes()
+                        ) {
+                            Text(
+                                text = if (silentAutoUpdate) "Silent Auto-Update" else "Manual",
+                                maxLines = 1
+                            )
+                        }
                     }
 
                     AnimatedVisibility(
@@ -441,7 +446,7 @@ fun AddAppScreen(
                             Spacer(Modifier.width(8.dp))
                             Text("Resolving & Selecting ABI APK...")
                         } else {
-                            Icon(Icons.Rounded.RocketLaunch, contentDescription = null)
+                            Icon(Icons.Rounded.AddCircle, contentDescription = null)
                             Spacer(Modifier.width(8.dp))
                             Text("Add & Sync Release")
                         }

@@ -24,11 +24,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -267,7 +265,7 @@ fun AppsDashboardScreen(
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = "Apps",
-                            style = MaterialTheme.typography.displaySmall,
+                            style = MaterialTheme.typography.headlineLarge,
                             fontWeight = FontWeight.Black,
                             letterSpacing = (-0.5).sp
                         )
@@ -345,7 +343,7 @@ fun AppsDashboardScreen(
             OutlinedTextField(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
-                placeholder = { Text("Search apps, package IDs, authors...") },
+                placeholder = { Text("Search apps...") },
                 leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
                 trailingIcon = {
                     AnimatedVisibility(
@@ -945,20 +943,9 @@ private fun ObtainiumAppRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(IntrinsicSize.Min)
-                .padding(horizontal = 12.dp, vertical = 12.dp),
+                .padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(
-                modifier = Modifier
-                    .width(4.dp)
-                    .fillMaxHeight()
-                    .padding(vertical = 4.dp)
-                    .clip(CircleShape)
-                    .background(categoryColor)
-            )
-            Spacer(Modifier.width(12.dp))
-
             ExpressiveAppAvatar(
                 packageId = app.id,
                 appName = app.name,
@@ -966,7 +953,7 @@ private fun ObtainiumAppRow(
                 isSelected = isSelected,
                 isFrozen = app.isFrozen,
                 isBusy = isBusy,
-                size = 50.dp
+                size = 48.dp
             )
 
             Spacer(Modifier.width(12.dp))
@@ -993,14 +980,14 @@ private fun ObtainiumAppRow(
                         modifier = Modifier.weight(1f, fill = false)
                     )
                     Surface(
-                        shape = MaterialShapes.Slanted.toShape(),
+                        shape = RoundedCornerShape(6.dp),
                         color = MaterialTheme.colorScheme.surfaceContainerHighest
                     ) {
                         Text(
                             text = app.sourceType,
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
                             maxLines = 1
                         )
                     }

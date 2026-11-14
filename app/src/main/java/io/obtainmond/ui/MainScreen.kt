@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
@@ -122,6 +123,18 @@ fun ObtainmondRootApp(sharedUrlFromIntent: String? = null) {
 
     BackHandler(enabled = selectedAppIds.isNotEmpty() && openedAppId == null) {
         selectedAppIds = emptySet()
+    }
+
+    BackHandler(enabled = selectedAppIds.isEmpty() && openedAppId == null && pagerState.currentPage != 0) {
+        scope.launch {
+            pagerState.animateScrollToPage(
+                page = 0,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            )
+        }
     }
 
     fun triggerSyncAll() {
@@ -356,6 +369,7 @@ private fun MultiSelectFloatingToolbar(
     Box(
         modifier = Modifier
             .fillMaxWidth()
+            .wrapContentHeight()
             .navigationBarsPadding()
             .padding(horizontal = 16.dp, vertical = 12.dp),
         contentAlignment = Alignment.Center

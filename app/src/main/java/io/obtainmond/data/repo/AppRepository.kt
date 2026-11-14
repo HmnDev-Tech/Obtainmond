@@ -108,9 +108,20 @@ object AppRepository {
         runCatching {
             val af = appsFile()
             if (af.exists()) {
-                _apps.value = json.decodeFromString<List<TrackedApp>>(af.readText())
+                val loaded = json.decodeFromString<List<TrackedApp>>(af.readText())
+                val sanitized = loaded.map { app ->
+                    val filteredCats = app.categories.filterNot { it.equals("Rust", ignoreCase = true) }
+                    if (filteredCats.size != app.categories.size) {
+                        app.copy(categories = filteredCats)
+                    } else {
+                        app
+                    }
+                }
+                _apps.value = sanitized
+                if (sanitized != loaded) {
+                    saveAppsToDisk(sanitized)
+                }
             } else {
-                // Seed with Shevery & Obtainmond self-tracking defaults on first launch
                 val defaults = listOf(
                     TrackedApp(
                         id = "moe.shizuku.privileged.api",
@@ -128,7 +139,7 @@ object AppRepository {
                         url = "https://github.com/HmnDev-Tech/Obtainmond",
                         sourceType = "GITHUB",
                         apiUrl = "https://api.github.com/repos/HmnDev-Tech/Obtainmond/releases?per_page=15",
-                        categories = listOf("Updater", "Rust")
+                        categories = listOf("Updater")
                     )
                 )
                 _apps.value = defaults
@@ -138,7 +149,23 @@ object AppRepository {
         runCatching {
             val lf = logsFile()
             if (lf.exists()) {
-                _logs.value = json.decodeFromString<List<AppEventLog>>(lf.readText())
+                val loadedLogs = json.decodeFromString<List<AppEventLog>>(lf.readText())
+                val sanitizedLogs = loadedLogs
+                    .filterNot {
+                        it.appId == appContext.packageName &&
+                            it.details.contains("No release containing .apk assets found", ignoreCase = true)
+                    }
+                    .map { entry ->
+                        if (entry.backendUsed == "Rust Release Engine") {
+                            entry.copy(backendUsed = "Release Checker")
+                        } else {
+                            entry
+                        }
+                    }
+                _logs.value = sanitizedLogs
+                if (sanitizedLogs != loadedLogs) {
+                    lf.writeText(json.encodeToString(sanitizedLogs))
+                }
             }
         }
     }
@@ -438,6 +465,15 @@ object AppRepository {
         )
 
         if (parsed.error != null) {
+            if (app.id == appContext.packageName && app.installedVersion.isNotBlank()) {
+                val normalizedInstalled = ObtainmondNative.safeNormalizeVersion(app.installedVersion)
+                return@withContext app.copy(
+                    latestVersion = normalizedInstalled,
+                    matchedAbi = app.installedAbi.ifBlank { "arm64-v8a" },
+                    lastCheckedEpochMs = System.currentTimeMillis(),
+                    installedReleaseTag = normalizedInstalled
+                )
+            }
             throw IllegalStateException(parsed.error)
         }
 
@@ -500,7 +536,7 @@ object AppRepository {
                     appId = app.id,
                     appName = app.name,
                     action = "Check Release",
-                    backendUsed = "Rust Release Engine",
+                    backendUsed = "Release Checker",
                     details = e.message ?: "Failed to check release",
                     success = false
                 )
@@ -584,7 +620,7 @@ object AppRepository {
                     appendLog(
                         appId = currentApp.id,
                         appName = currentApp.name,
-                        action = "Rust Integrity Guard",
+                        action = "Integrity Guard",
                         backendUsed = "libobtainmond_core.so",
                         details = "Blocked corrupt APK: ${integrity.summary}",
                         success = false
@@ -595,7 +631,7 @@ object AppRepository {
                     appendLog(
                         appId = currentApp.id,
                         appName = currentApp.name,
-                        action = "Rust ABI Guard",
+                        action = "ABI Guard",
                         backendUsed = "libobtainmond_core.so",
                         details = "Blocked incompatible ABI: ${integrity.summary}",
                         success = false

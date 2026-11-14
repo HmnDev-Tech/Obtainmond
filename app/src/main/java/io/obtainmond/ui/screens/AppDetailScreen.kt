@@ -259,7 +259,7 @@ fun AppDetailScreen(
                             verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             Surface(
-                                shape = MaterialShapes.Slanted.toShape(),
+                                shape = RoundedCornerShape(6.dp),
                                 color = MaterialTheme.colorScheme.secondaryContainer
                             ) {
                                 Text(
@@ -270,7 +270,9 @@ fun AppDetailScreen(
                                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                                 )
                             }
-                            app.categories.forEach { cat ->
+                            app.categories
+                                .filterNot { it.equals("Rust", ignoreCase = true) }
+                                .forEach { cat ->
                                 val c = categoryAccentColor(cat, MaterialTheme.colorScheme.tertiary)
                                 Surface(
                                     shape = CircleShape,
