@@ -1,6 +1,6 @@
 [package]
 name = "obtainmond-core"
-version = "2.0.0"
+version = "2.0.1"
 edition = "2021"
 description = "Rust core engine for Obtainmond: version normalization, smart ABI APK selection, release API parsers, and APK ZIP/SHA-256 integrity verification"
 

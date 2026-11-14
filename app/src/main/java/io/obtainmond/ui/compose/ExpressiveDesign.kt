@@ -188,7 +188,15 @@ private suspend fun loadPackageIcon(context: Context, packageId: String): ImageB
                 return@runCatching bmp
             }
             val pm = context.packageManager
-            val appInfo = pm.getApplicationInfo(packageId, 0)
+            val appInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                pm.getApplicationInfo(
+                    packageId,
+                    android.content.pm.PackageManager.ApplicationInfoFlags.of(0L)
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                pm.getApplicationInfo(packageId, 0)
+            }
             val drawable = runCatching {
                 val res = pm.getResourcesForApplication(appInfo)
                 if (appInfo.icon != 0) {

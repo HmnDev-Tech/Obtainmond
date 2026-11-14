@@ -138,7 +138,10 @@ pub fn build_silent_install_command(
     }
 
     let safe_apk = quote_shell_arg(apk_path);
-    let install_cmd = format!("pm install {} {}", flags, safe_apk);
+    let install_cmd = format!(
+        "(if [ \"$(getprop ro.build.version.sdk 2>/dev/null || echo 0)\" -ge 34 ]; then pm install --bypass-low-target-sdk-block {} {} 2>/dev/null || pm install {} {}; else pm install {} {}; fi)",
+        flags, safe_apk, flags, safe_apk, flags, safe_apk
+    );
 
     if !target_package_for_dexopt.trim().is_empty() {
         let safe_pkg = quote_shell_arg(target_package_for_dexopt.trim());

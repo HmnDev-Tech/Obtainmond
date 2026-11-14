@@ -333,6 +333,7 @@ object PrivilegeManager {
             add("cmd appops set $pkg RUN_IN_BACKGROUND allow")
             add("cmd appops set $pkg RUN_ANY_IN_BACKGROUND allow")
             add("cmd appops set $pkg REQUEST_INSTALL_PACKAGES allow")
+            add("cmd appops set $pkg RUN_USER_INITIATED_JOBS allow")
             if (settings.labImmortalStandbyBucketActive) {
                 add("am set-standby-bucket $pkg active")
             }
@@ -366,7 +367,15 @@ object PrivilegeManager {
     ): File? = withContext(Dispatchers.IO) {
         runCatching {
             val safePkg = validatePackageName(packageName)
-            val appInfo = context.packageManager.getApplicationInfo(safePkg, 0)
+            val appInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                context.packageManager.getApplicationInfo(
+                    safePkg,
+                    PackageManager.ApplicationInfoFlags.of(0L)
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                context.packageManager.getApplicationInfo(safePkg, 0)
+            }
             val srcFile = File(appInfo.sourceDir)
             if (!srcFile.exists()) return@withContext null
             val rollbackDir = File(context.filesDir, "rollback_vault").apply { mkdirs() }
@@ -421,6 +430,64 @@ object PrivilegeManager {
             if (outcome.isSuccess && outcome.stdout.contains("Success", ignoreCase = true)) {
                 return@withContext outcome
             }
+        }
+
+        val sessionOutcome = runCatching {
+            val packageInstaller = context.packageManager.packageInstaller
+            val params = android.content.pm.PackageInstaller.SessionParams(
+                android.content.pm.PackageInstaller.SessionParams.MODE_FULL_INSTALL
+            ).apply {
+                setSize(apkFile.length())
+                if (targetPackageId.isNotBlank()) {
+                    setAppPackageName(targetPackageId)
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    setRequireUserAction(
+                        android.content.pm.PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED
+                    )
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    setPackageSource(android.content.pm.PackageInstaller.PACKAGE_SOURCE_STORE)
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                    setRequestUpdateOwnership(true)
+                    setApplicationEnabledSettingPersistent()
+                }
+            }
+            val sessionId = packageInstaller.createSession(params)
+            packageInstaller.openSession(sessionId).use { session ->
+                apkFile.inputStream().use { input ->
+                    session.openWrite("base.apk", 0, apkFile.length()).use { output ->
+                        input.copyTo(output, bufferSize = 64 * 1024)
+                        session.fsync(output)
+                    }
+                }
+                val callbackIntent = Intent(context, PackageInstallerStatusReceiver::class.java).apply {
+                    setPackage(context.packageName)
+                }
+                val pendingFlags = android.app.PendingIntent.FLAG_UPDATE_CURRENT or
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        android.app.PendingIntent.FLAG_MUTABLE
+                    } else {
+                        0
+                    }
+                val pendingIntent = android.app.PendingIntent.getBroadcast(
+                    context,
+                    sessionId,
+                    callbackIntent,
+                    pendingFlags
+                )
+                session.commit(pendingIntent.intentSender)
+            }
+            ShellExecOutcome(
+                exitCode = 0,
+                stdout = "Committed PackageInstaller session",
+                stderr = "",
+                backendUsed = "System PackageInstaller"
+            )
+        }.getOrNull()
+        if (sessionOutcome != null) {
+            return@withContext sessionOutcome
         }
 
         // Standard system PackageInstaller fallback if unprivileged

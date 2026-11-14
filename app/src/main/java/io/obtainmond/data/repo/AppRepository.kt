@@ -240,10 +240,24 @@ object AppRepository {
     suspend fun syncInstalledPackagesState() = withContext(Dispatchers.IO) {
         mutex.withLock {
             val pm = appContext.packageManager
-            val installedList by lazy { runCatching { pm.getInstalledPackages(0) }.getOrDefault(emptyList()) }
+            val installedList by lazy {
+                runCatching {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        pm.getInstalledPackages(PackageManager.PackageInfoFlags.of(0L))
+                    } else {
+                        @Suppress("DEPRECATION")
+                        pm.getInstalledPackages(0)
+                    }
+                }.getOrDefault(emptyList())
+            }
             val updated = _apps.value.map { app ->
                 val directInfo = runCatching {
-                    pm.getPackageInfo(app.id, 0)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        pm.getPackageInfo(app.id, PackageManager.PackageInfoFlags.of(0L))
+                    } else {
+                        @Suppress("DEPRECATION")
+                        pm.getPackageInfo(app.id, 0)
+                    }
                 }.getOrNull()
                 val pkgInfo = directInfo ?: installedList.firstOrNull { pkg ->
                     pkg.packageName.equals(app.id, ignoreCase = true) ||
@@ -439,7 +453,7 @@ object AppRepository {
         } else {
             val reqBuilder = Request.Builder()
                 .url(endpoint)
-                .header("User-Agent", "Obtainmond/2.0.0 (Android; RustCore)")
+                .header("User-Agent", "Obtainmond/2.0.1 (Android; RustCore)")
                 .header("Accept", "application/json, text/html;q=0.9, */*;q=0.8")
 
             if (desc.sourceType == "GITHUB" && currentSettings.githubPersonalAccessToken.isNotBlank()) {
@@ -600,7 +614,7 @@ object AppRepository {
 
             val req = Request.Builder()
                 .url(effectiveUrl)
-                .header("User-Agent", "Obtainmond/2.0.0 (Android; RustCore)")
+                .header("User-Agent", "Obtainmond/2.0.1 (Android; RustCore)")
                 .build()
 
             httpClient.newCall(req).execute().use { resp ->
@@ -642,10 +656,18 @@ object AppRepository {
 
             // Extract real packageName and versionName from downloaded APK archive
             val archiveInfo = runCatching {
-                appContext.packageManager.getPackageArchiveInfo(
-                    targetApkFile.absolutePath,
-                    PackageManager.GET_META_DATA
-                )
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    appContext.packageManager.getPackageArchiveInfo(
+                        targetApkFile.absolutePath,
+                        PackageManager.PackageInfoFlags.of(PackageManager.GET_META_DATA.toLong())
+                    )
+                } else {
+                    @Suppress("DEPRECATION")
+                    appContext.packageManager.getPackageArchiveInfo(
+                        targetApkFile.absolutePath,
+                        PackageManager.GET_META_DATA
+                    )
+                }
             }.getOrNull()
 
             val realPackageId = archiveInfo?.packageName?.takeIf { it.isNotBlank() } ?: currentApp.id

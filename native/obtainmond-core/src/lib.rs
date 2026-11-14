@@ -33,7 +33,7 @@ pub extern "system" fn Java_io_obtainmond_rust_ObtainmondNative_getEngineVersion
 ) -> jstring {
     rust_to_jstring(
         &mut env,
-        "Obtainmond Rust Core v2.0.0 (Zero-Touch ABI Selector + Release Engine + SHA256 Guard)",
+        "Obtainmond Rust Core v2.0.1 (Zero-Touch ABI Selector + Release Engine + SHA256 Guard)",
     )
 }
 

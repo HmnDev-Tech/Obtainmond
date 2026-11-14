@@ -29,17 +29,18 @@ jobs:
           java-version: '21'
           cache: 'gradle'
 
-      - name: Accept Android SDK licenses
+      - name: Accept Android SDK licenses & Install SDK 37
         run: |
           yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null 2>&1 || true
+          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37.0" "build-tools;37.0.0"
 
       - name: Detect or Install Android NDK
         run: |
           NDK_DIR=$(ls -d "$ANDROID_SDK_ROOT/ndk"/* 2>/dev/null | sort -V | tail -n1)
           if [ -z "$NDK_DIR" ]; then
             echo "Installing NDK via sdkmanager..."
-            "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "ndk;27.2.12479018"
-            NDK_DIR="$ANDROID_SDK_ROOT/ndk/27.2.12479018"
+            "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "ndk;27.3.13750724"
+            NDK_DIR="$ANDROID_SDK_ROOT/ndk/27.3.13750724"
           fi
           echo "Selected NDK directory: $NDK_DIR"
           echo "ANDROID_NDK_HOME=$NDK_DIR" >> $GITHUB_ENV

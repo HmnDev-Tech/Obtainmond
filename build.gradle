@@ -9,10 +9,10 @@ idea.module {
 subprojects {
     plugins.withId("com.android.base") {
         android {
-            compileSdk = 35
+            compileSdk = 37
             defaultConfig {
                 minSdk = 26
-                targetSdk = 35
+                targetSdk = 37
             }
             compileOptions {
                 sourceCompatibility = JavaVersion.VERSION_21
@@ -33,5 +33,5 @@ try {
 
 ext {
     versionCode = gitCommitCount
-    versionName = "2.0.0-rust"
+    versionName = "2.0.1"
 }
