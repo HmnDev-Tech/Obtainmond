@@ -72,8 +72,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TonalToggleButton
-import androidx.compose.material3.ToggleButtonDefaults
+import androidx.compose.material3.FilledTonalToggleButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
@@ -307,12 +306,11 @@ fun AppsDashboardScreen(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        TonalToggleButton(
+                        FilledTonalToggleButton(
                             checked = settings.groupByCategory,
                             onCheckedChange = { enabled ->
                                 AppRepository.updateSettings { it.copy(groupByCategory = enabled) }
-                            },
-                            shapes = ToggleButtonDefaults.shapes()
+                            }
                         ) {
                             Icon(
                                 imageVector = Icons.Rounded.FolderCopy,
@@ -661,12 +659,11 @@ fun AppsDashboardScreen(
                             2 to "Last Updated",
                             3 to "Source"
                         ).forEach { (mode, label) ->
-                            TonalToggleButton(
+                            FilledTonalToggleButton(
                                 checked = settings.appSortMode == mode,
                                 onCheckedChange = {
                                     AppRepository.updateSettings { it.copy(appSortMode = mode) }
-                                },
-                                shapes = ToggleButtonDefaults.shapes()
+                                }
                             ) {
                                 Text(label)
                             }

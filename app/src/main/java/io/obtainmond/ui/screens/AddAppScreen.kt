@@ -51,8 +51,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TonalToggleButton
-import androidx.compose.material3.ToggleButtonDefaults
+import androidx.compose.material3.FilledTonalToggleButton
 import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -283,19 +282,17 @@ fun AddAppScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        TonalToggleButton(
+                        FilledTonalToggleButton(
                             checked = showAdvanced,
-                            onCheckedChange = { showAdvanced = it },
-                            shapes = ToggleButtonDefaults.shapes()
+                            onCheckedChange = { showAdvanced = it }
                         ) {
                             Icon(Icons.Rounded.Tune, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(6.dp))
                             Text(if (showAdvanced) "Hide Options" else "Source Options", maxLines = 1)
                         }
-                        TonalToggleButton(
+                        FilledTonalToggleButton(
                             checked = silentAutoUpdate,
-                            onCheckedChange = { silentAutoUpdate = it },
-                            shapes = ToggleButtonDefaults.shapes()
+                            onCheckedChange = { silentAutoUpdate = it }
                         ) {
                             Text(
                                 text = if (silentAutoUpdate) "Silent Auto-Update" else "Manual",

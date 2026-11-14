@@ -86,8 +86,7 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TonalToggleButton
-import androidx.compose.material3.ToggleButtonDefaults
+import androidx.compose.material3.FilledTonalToggleButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -459,12 +458,11 @@ fun ObtainedLabsScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         InstallerSpoofPreset.entries.forEach { preset ->
-                            TonalToggleButton(
+                            FilledTonalToggleButton(
                                 checked = settings.installerSpoofPreset == preset,
                                 onCheckedChange = {
                                     AppRepository.updateSettings { it.copy(installerSpoofPreset = preset) }
-                                },
-                                shapes = ToggleButtonDefaults.shapes()
+                                }
                             ) {
                                 Text(preset.packageId.substringAfterLast('.'))
                             }
@@ -857,12 +855,11 @@ private fun AppearanceSettingsSubPage(
                     }
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf(0 to "System", 1 to "Light", 2 to "Dark").forEach { (mode, label) ->
-                            TonalToggleButton(
+                            FilledTonalToggleButton(
                                 checked = settings.themeMode == mode,
                                 onCheckedChange = {
                                     AppRepository.updateSettings { it.copy(themeMode = mode) }
-                                },
-                                shapes = ToggleButtonDefaults.shapes()
+                                }
                             ) {
                                 Text(label)
                             }
