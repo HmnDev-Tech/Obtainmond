@@ -380,7 +380,7 @@ fun AppsDashboardScreen(
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        text = "Syncing releases via Rust engine...",
+                        text = "Checking for updates...",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary,
                         fontWeight = FontWeight.SemiBold

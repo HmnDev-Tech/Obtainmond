@@ -63,6 +63,8 @@ object AppRepository {
     private val _busyAppIds = MutableStateFlow<Set<String>>(emptySet())
     val busyAppIds: StateFlow<Set<String>> = _busyAppIds.asStateFlow()
 
+    private val logLock = Any()
+
     fun init(context: Context) {
         if (::appContext.isInitialized) return
         appContext = context.applicationContext
@@ -158,17 +160,30 @@ object AppRepository {
             details = details,
             success = success
         )
-        val updated = (listOf(entry) + _logs.value).take(150)
-        _logs.value = updated
+        val updated = synchronized(logLock) {
+            val next = (listOf(entry) + _logs.value).take(150)
+            _logs.value = next
+            next
+        }
         scope.launch {
-            runCatching { logsFile().writeText(json.encodeToString(updated)) }
+            runCatching {
+                synchronized(logLock) {
+                    logsFile().writeText(json.encodeToString(updated))
+                }
+            }
         }
     }
 
     fun clearLogs() {
-        _logs.value = emptyList()
+        synchronized(logLock) {
+            _logs.value = emptyList()
+        }
         scope.launch {
-            runCatching { logsFile().delete() }
+            runCatching {
+                synchronized(logLock) {
+                    logsFile().delete()
+                }
+            }
         }
     }
 

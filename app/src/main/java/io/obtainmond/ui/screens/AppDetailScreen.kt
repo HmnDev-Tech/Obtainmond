@@ -307,7 +307,7 @@ fun AppDetailScreen(
                             )
                             Spacer(Modifier.height(8.dp))
                             Text(
-                                text = "Working with Rust engine & privileged installer...",
+                                text = "Updating...",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.primary,
                                 fontWeight = FontWeight.SemiBold
@@ -586,7 +586,7 @@ fun AppDetailScreen(
                                 Spacer(Modifier.width(10.dp))
                                 Column {
                                     Text(
-                                        text = "Rust Smart APK Selection",
+                                        text = "Selected APK",
                                         style = MaterialTheme.typography.titleSmall,
                                         fontWeight = FontWeight.Bold
                                     )

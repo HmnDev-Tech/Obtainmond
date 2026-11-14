@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -95,6 +96,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.obtainmond.BuildConfig
 import io.obtainmond.data.model.InstallerSpoofPreset
 import io.obtainmond.data.model.ObtainmondSettings
 import io.obtainmond.data.model.PrivilegeBackendMode
@@ -102,7 +104,6 @@ import io.obtainmond.data.model.TrackedApp
 import io.obtainmond.data.repo.AppRepository
 import io.obtainmond.privilege.PrivilegeManager
 import io.obtainmond.privilege.PrivilegeStatus
-import io.obtainmond.rust.ObtainmondNative
 import io.obtainmond.ui.compose.ExpressiveAppAvatar
 import io.obtainmond.ui.compose.ExpressiveButton
 import io.obtainmond.ui.compose.ExpressivePulsingDot
@@ -156,19 +157,12 @@ fun ObtainedLabsScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item {
-            Column {
-                Text(
-                    text = "Obtainmond Labs",
-                    style = MaterialTheme.typography.displaySmall,
-                    fontWeight = FontWeight.Black,
-                    letterSpacing = (-0.5).sp
-                )
-                Text(
-                    text = "Privileged Shevery-API, Rust security & ART compiler tools",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
+            Text(
+                text = "Labs",
+                style = MaterialTheme.typography.displaySmall,
+                fontWeight = FontWeight.Black,
+                letterSpacing = (-0.5).sp
+            )
         }
 
         item {
@@ -260,13 +254,13 @@ fun ObtainedLabsScreen(
 
         item {
             SettingsGroup(
-                title = "Zero-Touch Background Daemon",
+                title = "Background Updates",
                 items = listOf(
                     {
                         SwitchSettingsRow(
                             icon = Icons.Rounded.AutoAwesome,
                             title = "Silent Background Auto-Updates",
-                            subtitle = "Automatically update tracked apps using matched ABI APK without prompting",
+                            subtitle = "Update tracked apps automatically in background",
                             checked = settings.zeroTouchBackgroundUpdate,
                             shape = MaterialShapes.Cookie6Sided,
                             onCheckedChange = { enabled ->
@@ -280,8 +274,8 @@ fun ObtainedLabsScreen(
                     {
                         SwitchSettingsRow(
                             icon = Icons.Rounded.BatteryChargingFull,
-                            title = "Privileged Doze Self-Whitelist",
-                            subtitle = "Keeps io.obtainmond exempt via deviceidle & RUN_ANY_IN_BACKGROUND",
+                            title = "Battery Optimization Exempt",
+                            subtitle = "Keep app exempt from Doze restrictions",
                             checked = settings.autoWhitelistBatteryDoze,
                             shape = MaterialShapes.Clover4Leaf,
                             onCheckedChange = { enabled ->
@@ -292,8 +286,8 @@ fun ObtainedLabsScreen(
                     {
                         SwitchSettingsRow(
                             icon = Icons.Rounded.Bolt,
-                            title = "Immortal Active Standby Bucket",
-                            subtitle = "Locks io.obtainmond in Android ACTIVE bucket",
+                            title = "Active Standby Bucket",
+                            subtitle = "Keep app in ACTIVE standby bucket",
                             checked = settings.labImmortalStandbyBucketActive,
                             shape = MaterialShapes.SoftBurst,
                             onCheckedChange = { enabled ->
@@ -320,13 +314,13 @@ fun ObtainedLabsScreen(
 
         item {
             SettingsGroup(
-                title = "Rust Security, Rollback & ART",
+                title = "Security & Install",
                 items = listOf(
                     {
                         SwitchSettingsRow(
                             icon = Icons.Rounded.Restore,
-                            title = "Instant Rollback Time-Machine",
-                            subtitle = "Snapshots base.apk before each silent update for 1-tap downgrade",
+                            title = "Rollback Backup",
+                            subtitle = "Keep previous APK before updating to allow 1-tap downgrade",
                             checked = settings.labInstantRollbackBackup,
                             shape = MaterialShapes.Arch,
                             onCheckedChange = { enabled ->
@@ -338,7 +332,7 @@ fun ObtainedLabsScreen(
                         SwitchSettingsRow(
                             icon = Icons.Rounded.Speed,
                             title = "Post-Install ART Speed-Profile",
-                            subtitle = "Runs cmd package compile -m speed-profile after silent updates",
+                            subtitle = "Compile with speed-profile after silent updates",
                             checked = settings.labPostInstallDexoptSpeedProfile,
                             shape = MaterialShapes.Gem,
                             onCheckedChange = { enabled ->
@@ -349,8 +343,8 @@ fun ObtainedLabsScreen(
                     {
                         SwitchSettingsRow(
                             icon = Icons.Rounded.Security,
-                            title = "Rust ABI & ZIP/Signature Guard",
-                            subtitle = "Validates ZIP Central Directory and native .so ABIs in Rust before install",
+                            title = "APK Integrity & ABI Check",
+                            subtitle = "Verify archive structure and device ABI before install",
                             checked = settings.labRustAbiAndSignatureGuard,
                             shape = MaterialShapes.Diamond,
                             onCheckedChange = { enabled ->
@@ -382,7 +376,7 @@ fun ObtainedLabsScreen(
             ) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        text = "Installer Package Spoofer (-i)",
+                        text = "Installer Package Name (-i)",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
@@ -640,25 +634,17 @@ private fun SettingsRootPage(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item {
-            Column {
-                Text(
-                    text = "Settings",
-                    style = MaterialTheme.typography.displaySmall,
-                    fontWeight = FontWeight.Black,
-                    letterSpacing = (-0.5).sp
-                )
-                Text(
-                    text = ObtainmondNative.safeEngineVersion(),
-                    style = MaterialTheme.typography.labelMedium,
-                    fontFamily = FontFamily.Monospace,
-                    color = MaterialTheme.colorScheme.primary
-                )
-            }
+            Text(
+                text = "Settings",
+                style = MaterialTheme.typography.displaySmall,
+                fontWeight = FontWeight.Black,
+                letterSpacing = (-0.5).sp
+            )
         }
 
         item {
             SettingsGroup(
-                title = "Core & Appearance",
+                title = "Appearance & Backend",
                 items = listOf(
                     {
                         NavigationSettingsRow(
@@ -666,8 +652,8 @@ private fun SettingsRootPage(
                             shape = MaterialShapes.Flower,
                             iconContainerColor = MaterialTheme.colorScheme.primaryContainer,
                             iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
-                            title = "Appearance & Expressive Motion",
-                            subtitle = "Theme, Dynamic Color, Pure Black OLED, AGSL motion blur, grouping",
+                            title = "Appearance",
+                            subtitle = "Theme, dynamic color, OLED black, category grouping",
                             onClick = { onNavigate(SettingsSubPage.APPEARANCE) }
                         )
                     },
@@ -677,7 +663,7 @@ private fun SettingsRootPage(
                             shape = MaterialShapes.Cookie7Sided,
                             iconContainerColor = MaterialTheme.colorScheme.secondaryContainer,
                             iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
-                            title = "Privilege Execution Backend",
+                            title = "Privilege Backend",
                             subtitle = privStatus.activeBackendLabel,
                             onClick = { onNavigate(SettingsSubPage.PRIVILEGE) }
                         )
@@ -696,8 +682,8 @@ private fun SettingsRootPage(
                             shape = MaterialShapes.Clover4Leaf,
                             iconContainerColor = MaterialTheme.colorScheme.tertiaryContainer,
                             iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
-                            title = "Import / Export & Migration",
-                            subtitle = "Obtainium JSON backup, restore & community app configurations",
+                            title = "Import / Export",
+                            subtitle = "Backup & restore tracked apps JSON",
                             onClick = { onNavigate(SettingsSubPage.IMPORT_EXPORT) }
                         )
                     },
@@ -707,8 +693,8 @@ private fun SettingsRootPage(
                             shape = MaterialShapes.Gem,
                             iconContainerColor = MaterialTheme.colorScheme.secondaryContainer,
                             iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
-                            title = "GitHub Token & Mirror",
-                            subtitle = if (settings.githubPersonalAccessToken.isNotBlank()) "PAT configured" else "Rate limit boost & mirror acceleration",
+                            title = "GitHub & Network",
+                            subtitle = if (settings.githubPersonalAccessToken.isNotBlank()) "Token configured" else "Personal token & download mirror",
                             onClick = { onNavigate(SettingsSubPage.GITHUB_NETWORK) }
                         )
                     }
@@ -718,7 +704,7 @@ private fun SettingsRootPage(
 
         item {
             SettingsGroup(
-                title = "Diagnostics & Project",
+                title = "Diagnostics & Info",
                 items = listOf(
                     {
                         NavigationSettingsRow(
@@ -726,8 +712,8 @@ private fun SettingsRootPage(
                             shape = MaterialShapes.SoftBurst,
                             iconContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
                             iconTint = MaterialTheme.colorScheme.onSurface,
-                            title = "Execution & Rust Audit Logs",
-                            subtitle = "Privileged shell outcomes, ABI checks & silent updates",
+                            title = "Logs",
+                            subtitle = "Update, install and background events",
                             badgeText = if (logsCount > 0) logsCount.toString() else null,
                             onClick = { onNavigate(SettingsSubPage.LOGS) }
                         )
@@ -738,8 +724,8 @@ private fun SettingsRootPage(
                             shape = MaterialShapes.Cookie9Sided,
                             iconContainerColor = MaterialTheme.colorScheme.primaryContainer,
                             iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
-                            title = "About Obtainmond",
-                            subtitle = "Rust + Kotlin Compose • Inspired by Obtainium",
+                            title = "About",
+                            subtitle = "Version & repository",
                             onClick = { onNavigate(SettingsSubPage.ABOUT) }
                         )
                     }
@@ -1204,6 +1190,7 @@ private fun AuditLogsSubPage(
     onBack: () -> Unit
 ) {
     val fmt = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
+    val visibleLogs = remember(logs) { logs.take(50) }
 
     LazyColumn(
         modifier = Modifier
@@ -1218,13 +1205,16 @@ private fun AuditLogsSubPage(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                     }
                     Spacer(Modifier.width(6.dp))
                     Text(
-                        text = "Audit Logs (${logs.size})",
+                        text = "Logs (${logs.size})",
                         style = MaterialTheme.typography.headlineMedium,
                         fontWeight = FontWeight.Black
                     )
@@ -1237,7 +1227,7 @@ private fun AuditLogsSubPage(
             }
         }
 
-        if (logs.isEmpty()) {
+        if (visibleLogs.isEmpty()) {
             item {
                 Surface(
                     shape = RoundedCornerShape(24.dp),
@@ -1245,7 +1235,7 @@ private fun AuditLogsSubPage(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
-                        text = "No silent update or privileged events recorded yet.",
+                        text = "No events recorded yet.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(20.dp)
@@ -1253,7 +1243,10 @@ private fun AuditLogsSubPage(
                 }
             }
         } else {
-            items(logs.take(50), key = { "${it.timestampMs}_${it.appId}_${it.action}" }) { entry ->
+            itemsIndexed(
+                items = visibleLogs,
+                key = { index, entry -> "${index}_${entry.timestampMs}" }
+            ) { _, entry ->
                 Surface(
                     shape = RoundedCornerShape(20.dp),
                     color = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -1292,10 +1285,12 @@ private fun AuditLogsSubPage(
                                 Text(
                                     text = "${entry.appName} • ${entry.action}",
                                     style = MaterialTheme.typography.labelLarge,
-                                    fontWeight = FontWeight.Bold
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.weight(1f)
                                 )
+                                Spacer(Modifier.width(8.dp))
                                 Text(
-                                    text = fmt.format(Date(entry.timestampMs)),
+                                    text = runCatching { fmt.format(Date(entry.timestampMs)) }.getOrDefault("--:--:--"),
                                     style = MaterialTheme.typography.labelSmall,
                                     fontFamily = FontFamily.Monospace
                                 )
@@ -1335,7 +1330,7 @@ private fun AboutSubPage(
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = bottomPadding + 104.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        item { SubPageHeader("About Obtainmond", onBack) }
+        item { SubPageHeader("About", onBack) }
 
         item {
             Surface(
@@ -1358,12 +1353,12 @@ private fun AboutSubPage(
                     }
                     Text("Obtainmond", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
                     Text(
-                        text = ObtainmondNative.safeEngineVersion(),
-                        style = MaterialTheme.typography.labelMedium,
+                        text = "v${BuildConfig.VERSION_NAME}",
+                        style = MaterialTheme.typography.labelLarge,
                         fontFamily = FontFamily.Monospace
                     )
                     Text(
-                        text = "Native Kotlin Jetpack Compose (Material 3 Expressive) + Rust core updater inspired by Obtainium.",
+                        text = "Direct Android app updater.",
                         style = MaterialTheme.typography.bodySmall
                     )
                     OutlinedButton(

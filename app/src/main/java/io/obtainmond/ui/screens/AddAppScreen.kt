@@ -16,7 +16,6 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -37,7 +36,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentPaste
-import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.RocketLaunch
 import androidx.compose.material.icons.rounded.Tune
@@ -69,7 +67,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -78,70 +75,8 @@ import io.obtainmond.data.repo.AppRepository
 import io.obtainmond.rust.ObtainmondNative
 import io.obtainmond.ui.compose.ExpressiveButton
 import io.obtainmond.ui.compose.ExpressiveShapeBadge
-import io.obtainmond.ui.compose.ExpressiveTonalButton
-import io.obtainmond.ui.compose.categoryAccentColor
 import io.obtainmond.ui.compose.scrollMotionBlur
 import kotlinx.coroutines.launch
-
-data class QuickCatalogItem(
-    val name: String,
-    val author: String,
-    val url: String,
-    val pkgHint: String,
-    val category: String
-)
-
-private val QUICK_CATALOG = listOf(
-    QuickCatalogItem(
-        name = "Shevery",
-        author = "HmnDev-Tech",
-        url = "https://github.com/HmnDev-Tech/Shevery",
-        pkgHint = "moe.shizuku.privileged.api",
-        category = "Privilege"
-    ),
-    QuickCatalogItem(
-        name = "Obtainmond",
-        author = "HmnDev-Tech",
-        url = "https://github.com/HmnDev-Tech/Obtainmond",
-        pkgHint = "io.obtainmond",
-        category = "Updater"
-    ),
-    QuickCatalogItem(
-        name = "Lawnchair",
-        author = "LawnchairLauncher",
-        url = "https://github.com/LawnchairLauncher/lawnchair",
-        pkgHint = "app.lawnchair",
-        category = "Launcher"
-    ),
-    QuickCatalogItem(
-        name = "NewPipe",
-        author = "TeamNewPipe",
-        url = "https://github.com/TeamNewPipe/NewPipe",
-        pkgHint = "org.schabi.newpipe",
-        category = "Media"
-    ),
-    QuickCatalogItem(
-        name = "Mihon",
-        author = "mihonapp",
-        url = "https://github.com/mihonapp/mihon",
-        pkgHint = "app.mihon",
-        category = "Reader"
-    ),
-    QuickCatalogItem(
-        name = "Breezy Weather",
-        author = "breezy-weather",
-        url = "https://github.com/breezy-weather/breezy-weather",
-        pkgHint = "org.breezyweather",
-        category = "Utility"
-    ),
-    QuickCatalogItem(
-        name = "Seal",
-        author = "JunkFood02",
-        url = "https://github.com/JunkFood02/Seal",
-        pkgHint = "com.junkfood.seal",
-        category = "Downloader"
-    )
-)
 
 private val SUPPORTED_SOURCES = listOf(
     "GitHub",
@@ -181,18 +116,6 @@ fun AddAppScreen(
 
     val resolvedPreview = remember(urlInput) {
         if (urlInput.isBlank()) null else ObtainmondNative.resolveSource(urlInput)
-    }
-
-    val catalogShapes = remember {
-        listOf(
-            MaterialShapes.Cookie4Sided,
-            MaterialShapes.Clover4Leaf,
-            MaterialShapes.SoftBurst,
-            MaterialShapes.Arch,
-            MaterialShapes.Flower,
-            MaterialShapes.Gem,
-            MaterialShapes.Sunny
-        )
     }
 
     LazyColumn(
@@ -521,121 +444,6 @@ fun AddAppScreen(
                             Text("Add & Sync Release")
                         }
                     }
-                }
-            }
-        }
-
-        item {
-            Text(
-                text = "Quick-Add Showcase",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.ExtraBold,
-                modifier = Modifier.padding(top = 4.dp, start = 4.dp)
-            )
-        }
-
-        val pairs = QUICK_CATALOG.chunked(2)
-        items(pairs.size) { rowIdx ->
-            val rowItems = pairs[rowIdx]
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                rowItems.forEachIndexed { colIdx, item ->
-                    val globalIdx = rowIdx * 2 + colIdx
-                    val poly = catalogShapes[globalIdx % catalogShapes.size]
-                    val accent = categoryAccentColor(item.category, MaterialTheme.colorScheme.primary)
-                    Surface(
-                        shape = RoundedCornerShape(24.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerLow,
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(24.dp))
-                            .clickable {
-                                urlInput = item.url
-                                customName = item.name
-                                customPkgId = item.pkgHint
-                                categoryInput = item.category
-                            }
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(14.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                ExpressiveShapeBadge(
-                                    polygon = poly,
-                                    containerColor = accent.copy(alpha = 0.2f),
-                                    contentColor = accent,
-                                    size = 38.dp
-                                ) {
-                                    Text(
-                                        text = item.name.take(2).uppercase(),
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = FontWeight.Black
-                                    )
-                                }
-                                Surface(
-                                    shape = CircleShape,
-                                    color = MaterialTheme.colorScheme.surfaceContainerHighest
-                                ) {
-                                    Text(
-                                        text = item.category,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                                    )
-                                }
-                            }
-
-                            Column {
-                                Text(
-                                    text = item.name,
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    text = item.author,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-
-                            ExpressiveTonalButton(
-                                enabled = !isSubmitting,
-                                onClick = {
-                                    scope.launch {
-                                        isSubmitting = true
-                                        AppRepository.addAppByUrl(
-                                            rawUrl = item.url,
-                                            customPackageId = item.pkgHint,
-                                            customName = item.name,
-                                            category = item.category,
-                                            installImmediately = true
-                                        )
-                                        isSubmitting = false
-                                        onAdded()
-                                    }
-                                },
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Icon(Icons.Rounded.Download, contentDescription = null, modifier = Modifier.size(15.dp))
-                                Spacer(Modifier.width(5.dp))
-                                Text("Get", maxLines = 1)
-                            }
-                        }
-                    }
-                }
-                if (rowItems.size == 1) {
-                    Spacer(Modifier.weight(1f))
                 }
             }
         }
