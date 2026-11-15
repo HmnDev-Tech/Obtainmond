@@ -1,15 +1,22 @@
 package io.obtainmond.privilege
 
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageInstaller
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.os.IBinder
+import android.os.IInterface
 import android.os.PowerManager
 import android.provider.Settings
 import androidx.core.content.FileProvider
 import com.hamondev.shevery.api.SheveryApiConstants
 import com.hamondev.shevery.api.SheveryPrivilege
+import com.rosan.dhizuku.api.Dhizuku
+import com.rosan.dhizuku.api.DhizukuRequestPermissionListener
 import io.obtainmond.data.model.ObtainmondSettings
 import io.obtainmond.data.model.PrivilegeBackendMode
 import io.obtainmond.rust.ObtainmondNative
@@ -31,6 +38,8 @@ data class PrivilegeStatus(
     val sheveryCapabilities: Int = 0,
     val shizukuBinderAlive: Boolean = false,
     val shizukuGranted: Boolean = false,
+    val dhizukuAvailable: Boolean = false,
+    val dhizukuGranted: Boolean = false,
     val serverUid: Int = -1,
     val serverVersion: Int = -1,
     val batteryOptimizationIgnored: Boolean = false,
@@ -38,6 +47,9 @@ data class PrivilegeStatus(
 ) {
     val hasPrivilegedShell: Boolean
         get() = (sheveryBinderAlive && sheveryGranted) || (shizukuBinderAlive && shizukuGranted)
+
+    val hasDhizuku: Boolean
+        get() = dhizukuAvailable && dhizukuGranted
 }
 
 data class ShellExecOutcome(
@@ -136,6 +148,9 @@ object PrivilegeManager {
             Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
         }.getOrDefault(false)
 
+        val dhizukuAvail = runCatching { Dhizuku.init(appContext) }.getOrDefault(false)
+        val dhizukuGranted = dhizukuAvail && runCatching { Dhizuku.isPermissionGranted() }.getOrDefault(false)
+
         val uid = when {
             sheveryAlive -> runCatching { SheveryPrivilege.getUid() }.getOrDefault(-1)
             shizukuAlive -> runCatching { Shizuku.getUid() }.getOrDefault(-1)
@@ -153,13 +168,14 @@ object PrivilegeManager {
         val label = when {
             sheveryGranted -> {
                 val mode = if (uid == 0) "Root" else "ADB"
-                "Shevery-API v14.6.4 Fast IPC ($mode)"
+                "Shevery-API Fast IPC ($mode)"
             }
             shizukuGranted -> {
                 val mode = if (uid == 0) "Root" else "ADB"
                 "Shizuku Binder ($mode)"
             }
-            sheveryAlive || shizukuAlive -> "Daemon Connected (Permission Needed)"
+            dhizukuGranted -> "Dhizuku (Device Owner)"
+            sheveryAlive || shizukuAlive || dhizukuAvail -> "Daemon Connected (Permission Needed)"
             else -> "Unprivileged (Standard Mode)"
         }
 
@@ -169,6 +185,8 @@ object PrivilegeManager {
             sheveryCapabilities = caps,
             shizukuBinderAlive = shizukuAlive,
             shizukuGranted = shizukuGranted,
+            dhizukuAvailable = dhizukuAvail,
+            dhizukuGranted = dhizukuGranted,
             serverUid = uid,
             serverVersion = ver,
             batteryOptimizationIgnored = batteryIgnored,
@@ -189,7 +207,26 @@ object PrivilegeManager {
             if (runCatching { Shizuku.pingBinder() }.getOrDefault(false)) {
                 if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
                     runCatching { Shizuku.requestPermission(REQUEST_CODE_PRIVILEGE) }
+                    return@launch
                 }
+            }
+            if (runCatching { Dhizuku.init(appCtx) }.getOrDefault(false) &&
+                !runCatching { Dhizuku.isPermissionGranted() }.getOrDefault(false)
+            ) {
+                requestDhizukuPermission(appCtx)
+            }
+        }
+    }
+
+    fun requestDhizukuPermission(context: Context) {
+        val appCtx = context.applicationContext
+        runCatching {
+            if (Dhizuku.init(appCtx) && !Dhizuku.isPermissionGranted()) {
+                Dhizuku.requestPermission(object : DhizukuRequestPermissionListener() {
+                    override fun onRequestPermission(grantResult: Int) {
+                        refreshStatus(connectShevery = false)
+                    }
+                })
             }
         }
     }
@@ -357,9 +394,74 @@ object PrivilegeManager {
         }
     }
 
+    fun isPackageDebuggable(context: Context, packageName: String): Boolean {
+        return runCatching {
+            val safePkg = validatePackageName(packageName)
+            val appInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                context.packageManager.getApplicationInfo(
+                    safePkg,
+                    PackageManager.ApplicationInfoFlags.of(0L)
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                context.packageManager.getApplicationInfo(safePkg, 0)
+            }
+            (appInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        }.getOrDefault(false)
+    }
+
+    fun resolveBackupApkFiles(backupPathOrFile: File): List<File> {
+        if (!backupPathOrFile.exists()) return emptyList()
+        if (backupPathOrFile.isFile) {
+            return if (backupPathOrFile.name.endsWith(".apk", ignoreCase = true) &&
+                backupPathOrFile.length() >= 22L
+            ) {
+                listOf(backupPathOrFile)
+            } else {
+                emptyList()
+            }
+        }
+        val apks = backupPathOrFile.listFiles()
+            ?.filter { it.isFile && it.name.endsWith(".apk", ignoreCase = true) && it.length() >= 22L }
+            ?.sortedWith(compareBy<File> { it.name != "base.apk" }.thenBy { it.name })
+            .orEmpty()
+        return apks
+    }
+
+    fun analyzeRollbackDowngradeFailure(
+        context: Context,
+        packageName: String,
+        outcome: ShellExecOutcome,
+        settings: ObtainmondSettings
+    ): String {
+        val raw = "${outcome.stdout} ${outcome.stderr}"
+        val isDowngradeErr = raw.contains("INSTALL_FAILED_VERSION_DOWNGRADE", ignoreCase = true) ||
+            raw.contains("downgrade", ignoreCase = true)
+        if (!isDowngradeErr) {
+            return outcome.stderr.ifBlank { outcome.stdout }.ifBlank { "Rollback install failed" }
+        }
+        val debuggable = isPackageDebuggable(context, packageName)
+        return when {
+            settings.privilegeMode == PrivilegeBackendMode.SYSTEM ||
+                settings.privilegeMode == PrivilegeBackendMode.EXTERNAL ||
+                settings.privilegeMode == PrivilegeBackendMode.DHIZUKU -> {
+                "Android blocks downgrades without a privileged ADB/Root shell (`pm install -r -d`). " +
+                    "Switch backend to Shevery/Shizuku/Root or uninstall first (data will be lost)."
+            }
+            !debuggable -> {
+                "Blocked by Android 7+ (`INSTALL_FAILED_VERSION_DOWNGRADE`): production `user` builds " +
+                    "restrict `-d` downgrades on non-debuggable release APKs. Uninstall the newer version first " +
+                    "if you still want to restore the snapshot (app data will be cleared unless backed up)."
+            }
+            else -> {
+                "Rollback rejected with `INSTALL_FAILED_VERSION_DOWNGRADE` (${outcome.stdout.ifBlank { outcome.stderr }})."
+            }
+        }
+    }
+
     /**
-     * Copies the currently installed base APK of [packageName] into Obtainmond's
-     * rollback vault before an update so the user can 1-click downgrade in Labs.
+     * Copies the currently installed base APK and any split APKs of [packageName] into
+     * `filesDir/rollback_vault/<packageName>/` before an update so rollback handles Split APKs cleanly.
      */
     suspend fun backupInstalledApkForRollback(
         context: Context,
@@ -376,78 +478,308 @@ object PrivilegeManager {
                 @Suppress("DEPRECATION")
                 context.packageManager.getApplicationInfo(safePkg, 0)
             }
-            val srcFile = File(appInfo.sourceDir)
-            if (!srcFile.exists()) return@withContext null
-            val rollbackDir = File(context.filesDir, "rollback_vault").apply { mkdirs() }
-            val dstFile = File(rollbackDir, "${safePkg}_rollback.apk")
-            srcFile.copyTo(dstFile, overwrite = true)
-            dstFile
+            val srcBase = File(appInfo.sourceDir)
+            if (!srcBase.exists()) return@withContext null
+
+            val vaultRoot = File(context.filesDir, "rollback_vault").apply { mkdirs() }
+            File(vaultRoot, "${safePkg}_rollback.apk").takeIf { it.exists() }?.delete()
+
+            val pkgVaultDir = File(vaultRoot, safePkg).apply {
+                if (exists()) deleteRecursively()
+                mkdirs()
+            }
+            srcBase.copyTo(File(pkgVaultDir, "base.apk"), overwrite = true)
+
+            val splits = appInfo.splitSourceDirs?.filter { it.isNotBlank() }.orEmpty()
+            splits.forEachIndexed { idx, splitPath ->
+                val splitSrc = File(splitPath)
+                if (splitSrc.exists() && splitSrc.isFile) {
+                    val safeName = splitSrc.name.replace(Regex("[^a-zA-Z0-9._-]"), "_")
+                        .let { if (it.endsWith(".apk", ignoreCase = true)) it else "$it.apk" }
+                    splitSrc.copyTo(File(pkgVaultDir, "split_${idx}_$safeName"), overwrite = true)
+                }
+            }
+
+            val debuggable = (appInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+            File(pkgVaultDir, "rollback_meta.txt").writeText(
+                "package=$safePkg\nsplits=${splits.size}\ndebuggable=$debuggable\n",
+                Charsets.UTF_8
+            )
+            pkgVaultDir
         }.getOrNull()
     }
 
-    /**
-     * Silently installs an APK on the fly in the background using Shevery-API / Shizuku.
-     * Stages the APK in `/data/local/tmp/obtainmond_stage.apk` so `system_server` / `pm`
-     * can read it regardless of app sandbox SELinux restrictions, then executes `pm install`
-     * with installer spoofing and optional `speed-profile` dexopt compilation.
-     */
     suspend fun installApkSilentlyOrFallback(
         context: Context,
         apkFile: File,
         targetPackageId: String,
         settings: ObtainmondSettings,
         allowDowngrade: Boolean = false
+    ): ShellExecOutcome = installApksSilentlyOrFallback(
+        context = context,
+        apkFiles = listOf(apkFile),
+        targetPackageId = targetPackageId,
+        settings = settings,
+        allowDowngrade = allowDowngrade
+    )
+
+    suspend fun installApksSilentlyOrFallback(
+        context: Context,
+        apkFiles: List<File>,
+        targetPackageId: String,
+        settings: ObtainmondSettings,
+        allowDowngrade: Boolean = false,
+        obbFiles: List<File> = emptyList(),
+        externalSourceFile: File? = null
     ): ShellExecOutcome = withContext(Dispatchers.IO) {
-        if (settings.privilegeMode != PrivilegeBackendMode.SYSTEM) {
-            val safeTargetPkg = if (targetPackageId.isNotBlank()) {
-                runCatching { validatePackageName(targetPackageId) }.getOrNull().orEmpty()
+        val validApks = apkFiles.filter { it.exists() && it.isFile && it.length() >= 22L }
+        if (validApks.isEmpty()) {
+            return@withContext ShellExecOutcome(-1, "", "No valid APK files to install", "Validation")
+        }
+
+        val safeTargetPkg = if (targetPackageId.isNotBlank()) {
+            runCatching { validatePackageName(targetPackageId) }.getOrNull().orEmpty()
+        } else {
+            ""
+        }
+
+        if (obbFiles.isNotEmpty() && safeTargetPkg.isNotBlank()) {
+            stageObbEntries(safeTargetPkg, obbFiles, settings)
+        }
+
+        if (settings.privilegeMode == PrivilegeBackendMode.EXTERNAL) {
+            return@withContext launchExternalInstaller(
+                context = context,
+                fileToShare = externalSourceFile?.takeIf { it.exists() } ?: validApks.first(),
+                installerPackage = settings.externalInstallerPackage
+            )
+        }
+
+        val allowShell = settings.privilegeMode == PrivilegeBackendMode.AUTO ||
+            settings.privilegeMode == PrivilegeBackendMode.SHEVERY ||
+            settings.privilegeMode == PrivilegeBackendMode.SHIZUKU ||
+            settings.privilegeMode == PrivilegeBackendMode.ROOT
+
+        if (allowShell) {
+            val shellOutcome = if (validApks.size == 1) {
+                installSingleApkViaShell(validApks.first(), safeTargetPkg, settings, allowDowngrade)
             } else {
-                ""
+                installSplitApksViaShell(validApks, safeTargetPkg, settings, allowDowngrade)
             }
-            val stagePath = "/data/local/tmp/obtainmond_${System.currentTimeMillis()}.apk"
-            val dexoptTarget = if (settings.labPostInstallDexoptSpeedProfile) safeTargetPkg else ""
-            val installCmd = ObtainmondNative.buildInstallShellCmd(
-                apkPath = stagePath,
-                installerPackage = settings.installerSpoofPreset.packageId,
-                allowDowngrade = allowDowngrade,
-                grantRuntimePermissions = settings.autoGrantRuntimePermissions,
-                targetPackageForDexopt = dexoptTarget
-            )
-
-            val fullScript = buildString {
-                append("cp ")
-                append("'${apkFile.absolutePath.replace("'", "'\"'\"'")}' ")
-                append("'$stagePath' && chmod 644 '$stagePath' && ")
-                append(installCmd)
-                append(" ; EXIT_CODE=\$? ; rm -f '$stagePath' ; exit \$EXIT_CODE")
+            if (shellOutcome.isSuccess && shellOutcome.stdout.contains("Success", ignoreCase = true)) {
+                return@withContext shellOutcome
             }
-
-            val outcome = execPrivilegedShell(
-                command = fullScript,
-                preferredMode = settings.privilegeMode,
-                timeoutMs = 180_000L
-            )
-            if (outcome.isSuccess && outcome.stdout.contains("Success", ignoreCase = true)) {
-                return@withContext outcome
+            if (settings.privilegeMode == PrivilegeBackendMode.SHEVERY ||
+                settings.privilegeMode == PrivilegeBackendMode.SHIZUKU ||
+                settings.privilegeMode == PrivilegeBackendMode.ROOT
+            ) {
+                return@withContext shellOutcome
+            }
+            if (allowDowngrade && shellOutcome.stdout.contains("INSTALL_FAILED_VERSION_DOWNGRADE", ignoreCase = true)) {
+                return@withContext shellOutcome
             }
         }
 
-        val sessionOutcome = runCatching {
-            val packageInstaller = context.packageManager.packageInstaller
-            val params = android.content.pm.PackageInstaller.SessionParams(
-                android.content.pm.PackageInstaller.SessionParams.MODE_FULL_INSTALL
-            ).apply {
-                setSize(apkFile.length())
+        if (settings.privilegeMode == PrivilegeBackendMode.DHIZUKU ||
+            settings.privilegeMode == PrivilegeBackendMode.AUTO
+        ) {
+            val dhizukuOutcome = tryDhizukuPackageInstallerSession(context, validApks, safeTargetPkg)
+            if (dhizukuOutcome != null && (dhizukuOutcome.isSuccess || settings.privilegeMode == PrivilegeBackendMode.DHIZUKU)) {
+                return@withContext dhizukuOutcome
+            }
+        }
+
+        val sessionOutcome = commitStandardPackageInstallerSession(
+            packageInstaller = context.packageManager.packageInstaller,
+            context = context,
+            apkFiles = validApks,
+            targetPackageId = safeTargetPkg,
+            backendLabel = "System PackageInstaller"
+        )
+        if (sessionOutcome != null) {
+            return@withContext sessionOutcome
+        }
+
+        if (validApks.size > 1) {
+            return@withContext ShellExecOutcome(
+                exitCode = -1,
+                stdout = "",
+                stderr = "Split APK bundles require Shevery, Shizuku, Dhizuku, Root, or External Installer",
+                backendUsed = "System PackageInstaller"
+            )
+        }
+
+        launchExternalInstaller(
+            context = context,
+            fileToShare = validApks.first(),
+            installerPackage = ""
+        )
+    }
+
+    private suspend fun installSingleApkViaShell(
+        apkFile: File,
+        safeTargetPkg: String,
+        settings: ObtainmondSettings,
+        allowDowngrade: Boolean
+    ): ShellExecOutcome {
+        val stagePath = "/data/local/tmp/obtainmond_${System.currentTimeMillis()}.apk"
+        val dexoptTarget = if (settings.labPostInstallDexoptSpeedProfile) safeTargetPkg else ""
+        val installCmd = ObtainmondNative.buildInstallShellCmd(
+            apkPath = stagePath,
+            installerPackage = settings.installerSpoofPreset.packageId,
+            allowDowngrade = allowDowngrade,
+            grantRuntimePermissions = settings.autoGrantRuntimePermissions,
+            targetPackageForDexopt = dexoptTarget
+        )
+        val fullScript = buildString {
+            append("cp ${shellQuote(apkFile.absolutePath)} ${shellQuote(stagePath)} && ")
+            append("chmod 644 ${shellQuote(stagePath)} && ")
+            append(installCmd)
+            append(" ; EXIT_CODE=\$? ; rm -f ${shellQuote(stagePath)} ; exit \$EXIT_CODE")
+        }
+        return execPrivilegedShell(
+            command = fullScript,
+            preferredMode = settings.privilegeMode,
+            timeoutMs = 180_000L
+        )
+    }
+
+    private suspend fun installSplitApksViaShell(
+        apkFiles: List<File>,
+        safeTargetPkg: String,
+        settings: ObtainmondSettings,
+        allowDowngrade: Boolean
+    ): ShellExecOutcome {
+        val stageDir = "/data/local/tmp/obtainmond_split_${System.currentTimeMillis()}"
+        val totalBytes = apkFiles.sumOf { it.length() }
+        val flags = buildList {
+            add("-r")
+            if (allowDowngrade) add("-d")
+            if (settings.autoGrantRuntimePermissions) add("-g")
+            val spoof = settings.installerSpoofPreset.packageId
+            if (spoof.isNotBlank() && VALID_PACKAGE_REGEX.matches(spoof)) {
+                add("-i")
+                add(shellQuote(spoof))
+            }
+            add("-S")
+            add(totalBytes.toString())
+        }.joinToString(" ")
+
+        val fullScript = buildString {
+            append("mkdir -p ${shellQuote(stageDir)} && ")
+            apkFiles.forEachIndexed { idx, file ->
+                val staged = "$stageDir/split_${idx}.apk"
+                append("cp ${shellQuote(file.absolutePath)} ${shellQuote(staged)} && chmod 644 ${shellQuote(staged)} && ")
+            }
+            append("SESSION_OUT=\$(pm install-create $flags 2>&1) ; ")
+            append("SID=\$(echo \"\$SESSION_OUT\" | sed -n 's/.*\\[\\([0-9]*\\)\\].*/\\1/p' | head -n1) ; ")
+            append("if [ -z \"\$SID\" ]; then echo \"\$SESSION_OUT\"; rm -rf ${shellQuote(stageDir)}; exit 1; fi ; ")
+            apkFiles.forEachIndexed { idx, file ->
+                val staged = "$stageDir/split_${idx}.apk"
+                append("pm install-write -S ${file.length()} \"\$SID\" split_${idx}.apk ${shellQuote(staged)} || { pm install-abandon \"\$SID\"; rm -rf ${shellQuote(stageDir)}; exit 1; } ; ")
+            }
+            append("COMMIT_OUT=\$(pm install-commit \"\$SID\" 2>&1) ; EXIT_CODE=\$? ; echo \"\$COMMIT_OUT\" ; ")
+            if (settings.labPostInstallDexoptSpeedProfile && safeTargetPkg.isNotBlank()) {
+                append("if [ \$EXIT_CODE -eq 0 ]; then cmd package compile -m speed-profile -f ${shellQuote(safeTargetPkg)} >/dev/null 2>&1 || true; fi ; ")
+            }
+            append("rm -rf ${shellQuote(stageDir)} ; exit \$EXIT_CODE")
+        }
+
+        return execPrivilegedShell(
+            command = fullScript,
+            preferredMode = settings.privilegeMode,
+            timeoutMs = 240_000L
+        )
+    }
+
+    private suspend fun stageObbEntries(
+        safePackageId: String,
+        obbFiles: List<File>,
+        settings: ObtainmondSettings
+    ) {
+        val dstDir = "/sdcard/Android/obb/$safePackageId"
+        val script = buildString {
+            append("mkdir -p ${shellQuote(dstDir)}")
+            obbFiles.forEach { file ->
+                val safeName = file.name.replace(Regex("[^a-zA-Z0-9._-]"), "_")
+                append(" && cp ${shellQuote(file.absolutePath)} ${shellQuote("$dstDir/$safeName")}")
+            }
+        }
+        execPrivilegedShell(script, settings.privilegeMode, timeoutMs = 60_000L)
+    }
+
+    private fun tryDhizukuPackageInstallerSession(
+        context: Context,
+        apkFiles: List<File>,
+        targetPackageId: String
+    ): ShellExecOutcome? {
+        val avail = runCatching { Dhizuku.init(context) }.getOrDefault(false)
+        if (!avail) {
+            return ShellExecOutcome(-1, "", "Dhizuku Device Owner service is unavailable", "Dhizuku")
+        }
+        val granted = runCatching { Dhizuku.isPermissionGranted() }.getOrDefault(false)
+        if (!granted) {
+            return ShellExecOutcome(-1, "", "Dhizuku permission not granted", "Dhizuku")
+        }
+        return runCatching {
+            val sysPi = context.packageManager.packageInstaller
+            val installerField = PackageInstaller::class.java.getDeclaredField("mInstaller").apply {
+                isAccessible = true
+            }
+            val origInstaller = installerField.get(sysPi) as? IInterface
+                ?: return@runCatching ShellExecOutcome(-1, "", "Unable to access system PackageInstaller binder", "Dhizuku")
+            val wrappedBinder = Dhizuku.binderWrapper(origInstaller.asBinder())
+            val stubClass = Class.forName("android.content.pm.IPackageInstaller\$Stub")
+            val wrappedProxy = stubClass.getMethod("asInterface", IBinder::class.java)
+                .invoke(null, wrappedBinder)
+            val ownerPkg = Dhizuku.getOwnerPackageName() ?: context.packageName
+
+            var dhizukuPi: PackageInstaller? = null
+            for (ctor in PackageInstaller::class.java.declaredConstructors) {
+                ctor.isAccessible = true
+                val params = ctor.parameterTypes
+                if (params.size == 4 && params[1] == String::class.java) {
+                    dhizukuPi = ctor.newInstance(wrappedProxy, ownerPkg, context.packageName, 0) as PackageInstaller
+                    break
+                } else if (params.size == 3 && params[1] == String::class.java) {
+                    dhizukuPi = ctor.newInstance(wrappedProxy, ownerPkg, 0) as PackageInstaller
+                    break
+                }
+            }
+            val pi = dhizukuPi
+                ?: return@runCatching ShellExecOutcome(-1, "", "Unsupported PackageInstaller constructor for Dhizuku", "Dhizuku")
+
+            commitStandardPackageInstallerSession(
+                packageInstaller = pi,
+                context = context,
+                apkFiles = apkFiles,
+                targetPackageId = targetPackageId,
+                backendLabel = "Dhizuku Device Owner"
+            ) ?: ShellExecOutcome(-1, "", "Dhizuku session creation failed", "Dhizuku")
+        }.getOrElse { e ->
+            ShellExecOutcome(-1, "", e.message ?: "Dhizuku binder call failed", "Dhizuku")
+        }
+    }
+
+    private fun commitStandardPackageInstallerSession(
+        packageInstaller: PackageInstaller,
+        context: Context,
+        apkFiles: List<File>,
+        targetPackageId: String,
+        backendLabel: String
+    ): ShellExecOutcome? {
+        return runCatching {
+            val totalSize = apkFiles.sumOf { it.length() }
+            val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
+                setSize(totalSize)
                 if (targetPackageId.isNotBlank()) {
                     setAppPackageName(targetPackageId)
                 }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    setRequireUserAction(
-                        android.content.pm.PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED
-                    )
+                    setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
                 }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    setPackageSource(android.content.pm.PackageInstaller.PACKAGE_SOURCE_STORE)
+                    setPackageSource(PackageInstaller.PACKAGE_SOURCE_STORE)
                 }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                     setRequestUpdateOwnership(true)
@@ -456,22 +788,25 @@ object PrivilegeManager {
             }
             val sessionId = packageInstaller.createSession(params)
             packageInstaller.openSession(sessionId).use { session ->
-                apkFile.inputStream().use { input ->
-                    session.openWrite("base.apk", 0, apkFile.length()).use { output ->
-                        input.copyTo(output, bufferSize = 64 * 1024)
-                        session.fsync(output)
+                apkFiles.forEachIndexed { idx, apkFile ->
+                    val entryName = if (idx == 0) "base.apk" else "split_${idx}.apk"
+                    apkFile.inputStream().use { input ->
+                        session.openWrite(entryName, 0, apkFile.length()).use { output ->
+                            input.copyTo(output, bufferSize = 64 * 1024)
+                            session.fsync(output)
+                        }
                     }
                 }
                 val callbackIntent = Intent(context, PackageInstallerStatusReceiver::class.java).apply {
                     setPackage(context.packageName)
                 }
-                val pendingFlags = android.app.PendingIntent.FLAG_UPDATE_CURRENT or
+                val pendingFlags = PendingIntent.FLAG_UPDATE_CURRENT or
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                        android.app.PendingIntent.FLAG_MUTABLE
+                        PendingIntent.FLAG_MUTABLE
                     } else {
                         0
                     }
-                val pendingIntent = android.app.PendingIntent.getBroadcast(
+                val pendingIntent = PendingIntent.getBroadcast(
                     context,
                     sessionId,
                     callbackIntent,
@@ -481,43 +816,60 @@ object PrivilegeManager {
             }
             ShellExecOutcome(
                 exitCode = 0,
-                stdout = "Committed PackageInstaller session",
+                stdout = "Committed PackageInstaller session ($backendLabel)",
                 stderr = "",
-                backendUsed = "System PackageInstaller"
+                backendUsed = backendLabel
             )
         }.getOrNull()
-        if (sessionOutcome != null) {
-            return@withContext sessionOutcome
-        }
+    }
 
-        // Standard system PackageInstaller fallback if unprivileged
-        withContext(Dispatchers.Main) {
-            runCatching {
-                val uri = FileProvider.getUriForFile(
-                    context,
-                    "${context.packageName}.fileprovider",
-                    apkFile
-                )
-                val intent = Intent(Intent.ACTION_VIEW).apply {
-                    setDataAndType(uri, "application/vnd.android.package-archive")
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-                context.startActivity(intent)
-                ShellExecOutcome(
-                    exitCode = 0,
-                    stdout = "Launched System PackageInstaller UI",
-                    stderr = "",
-                    backendUsed = "System PackageInstaller"
-                )
-            }.getOrElse { e ->
-                ShellExecOutcome(
-                    exitCode = -1,
-                    stdout = "",
-                    stderr = e.message ?: "Failed to launch system installer",
-                    backendUsed = "System PackageInstaller"
-                )
+    private suspend fun launchExternalInstaller(
+        context: Context,
+        fileToShare: File,
+        installerPackage: String
+    ): ShellExecOutcome = withContext(Dispatchers.Main) {
+        runCatching {
+            val uri = FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                fileToShare
+            )
+            val mime = if (fileToShare.name.endsWith(".apk", ignoreCase = true)) {
+                "application/vnd.android.package-archive"
+            } else {
+                "application/octet-stream"
             }
+            val viewIntent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, mime)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                val pkg = installerPackage.trim()
+                if (pkg.isNotEmpty() && VALID_PACKAGE_REGEX.matches(pkg)) {
+                    `package` = pkg
+                }
+            }
+            val launchIntent = if (installerPackage.isBlank()) {
+                Intent.createChooser(viewIntent, "Install package with").apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+            } else {
+                viewIntent
+            }
+            context.startActivity(launchIntent)
+            ShellExecOutcome(
+                exitCode = 0,
+                stdout = "Launched External Installer (${installerPackage.ifBlank { "chooser" }})",
+                stderr = "",
+                backendUsed = installerPackage.ifBlank { "System PackageInstaller" }
+            )
+        }.getOrElse { e ->
+            ShellExecOutcome(
+                exitCode = -1,
+                stdout = "",
+                stderr = e.message ?: "Failed to launch installer",
+                backendUsed = "External Installer"
+            )
         }
     }
 
