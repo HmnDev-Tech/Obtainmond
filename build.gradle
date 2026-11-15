@@ -33,5 +33,5 @@ try {
 
 ext {
     versionCode = gitCommitCount
-    versionName = "2.0.1"
+    versionName = "2.5.0"
 }

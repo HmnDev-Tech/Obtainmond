@@ -148,9 +148,9 @@ object ObtainmondNative {
 
     fun safeEngineVersion(): String {
         return if (isLoaded) {
-            runCatching { getEngineVersion() }.getOrDefault("Obtainmond Rust Core v2.0.1")
+            runCatching { getEngineVersion() }.getOrDefault("Obtainmond Rust Core v2.5.0")
         } else {
-            "Obtainmond Rust Core v2.0.1 (Fallback)"
+            "Obtainmond Rust Core v2.5.0 (Fallback)"
         }
     }
 
