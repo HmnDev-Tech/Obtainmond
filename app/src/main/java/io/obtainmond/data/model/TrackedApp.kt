@@ -4,10 +4,12 @@ import io.obtainmond.rust.ApkCandidateDto
 import kotlinx.serialization.Serializable
 
 enum class PrivilegeBackendMode(val title: String, val subtitle: String) {
-    AUTO("Auto (Shevery-API → Shizuku → Root)", "Uses Shevery fast IPC first, falls back to Shizuku or Root"),
+    AUTO("Auto (Shevery-API → Shizuku → Dhizuku → Root)", "Uses Shevery fast IPC first, then Shizuku, Dhizuku, or Root"),
     SHEVERY("Shevery Native API (v14.6.4)", "Ultra-low-latency flat Parcel execFast() + capability bitmasks"),
     SHIZUKU("Shizuku Legacy Binder", "Standard Shizuku IShizukuService process execution"),
+    DHIZUKU("Dhizuku Device Owner", "Silent Device Owner PackageInstaller via Dhizuku API"),
     ROOT("Root Shell (su -c)", "Direct Magisk / KernelSU / APatch root shell"),
+    EXTERNAL("External Installer (InstallerX / App Manager)", "Delegates verified package via FileProvider ACTION_VIEW"),
     SYSTEM("Standard Android Installer", "Manual system PackageInstaller confirmation")
 }
 
@@ -18,11 +20,26 @@ enum class InstallerSpoofPreset(val packageId: String, val label: String) {
     OBTAINMOND("io.obtainmond", "Obtainmond Self-Signed")
 }
 
+enum class VerificationPolicy(val title: String) {
+    OFF("Off"),
+    AUDIT("Audit (Warn & Log)"),
+    ENFORCE("Enforce (Block Install)")
+}
+
+@Serializable
+data class FolderRule(
+    val id: String,
+    val folderName: String,
+    val sourceTypes: List<String> = emptyList(),
+    val keywords: List<String> = emptyList(),
+    val includeCategories: List<String> = emptyList()
+)
+
 @Serializable
 data class TrackedApp(
     val id: String,
     val name: String,
-    val author: String,
+    val author: String = "",
     val url: String,
     val sourceType: String = "GITHUB",
     val apiUrl: String = "",
@@ -39,9 +56,12 @@ data class TrackedApp(
     val silentAutoUpdate: Boolean = true,
     val trackOnly: Boolean = false,
     val allowDowngrade: Boolean = false,
+    val onDemandOnly: Boolean = false,
+    val skippedVersion: String = "",
     val apkFilterRegex: String = "",
     val versionExtractionRegex: String = "",
     val categories: List<String> = emptyList(),
+    val folders: List<String> = emptyList(),
     val lastCheckedEpochMs: Long = 0L,
     val lastUpdatedEpochMs: Long = 0L,
     val backupApkPath: String = "",
@@ -50,12 +70,24 @@ data class TrackedApp(
     val isFrozen: Boolean = false,
     val pinned: Boolean = false,
     val installedReleaseTag: String = "",
-    val installedApkUrl: String = ""
+    val installedApkUrl: String = "",
+    val pinnedSigningCertSha256: String = "",
+    val lastError: String = "",
+    val errorCategory: String = "",
+    val lastSupplyChainSummary: String = ""
 ) {
+    val needsAttention: Boolean
+        get() = errorCategory.isNotBlank() || lastError.isNotBlank()
+
     val hasUpdate: Boolean
         get() {
             if (trackOnly || latestVersion.isBlank() || installedVersion.isBlank()) return false
             if (!allowDowngrade) {
+                if (skippedVersion.isNotBlank() &&
+                    io.obtainmond.rust.ObtainmondNative.areVersionsEquivalent(skippedVersion, latestVersion)
+                ) {
+                    return false
+                }
                 if (installedReleaseTag.isNotBlank() &&
                     io.obtainmond.rust.ObtainmondNative.areVersionsEquivalent(installedReleaseTag, latestVersion)
                 ) {
@@ -97,6 +129,7 @@ data class ObtainmondSettings(
     val backgroundIntervalMinutes: Int = 30,
     val autoWhitelistBatteryDoze: Boolean = true,
     val installerSpoofPreset: InstallerSpoofPreset = InstallerSpoofPreset.PLAY_STORE,
+    val externalInstallerPackage: String = "",
     val autoGrantRuntimePermissions: Boolean = true,
     // Lab Features
     val labInstantRollbackBackup: Boolean = true,
@@ -104,7 +137,13 @@ data class ObtainmondSettings(
     val labRustAbiAndSignatureGuard: Boolean = true,
     val labImmortalStandbyBucketActive: Boolean = true,
     val labGitHubMirrorAcceleration: Boolean = false,
-    val githubPersonalAccessToken: String = "",
+    val githubMirrorUrl: String = "",
+    // Supply-Chain Verification Policies
+    val reproducibleBuildsPolicy: VerificationPolicy = VerificationPolicy.AUDIT,
+    val githubAttestationPolicy: VerificationPolicy = VerificationPolicy.AUDIT,
+    val virusTotalPolicy: VerificationPolicy = VerificationPolicy.OFF,
+    // Folder Rules
+    val folderRules: List<FolderRule> = emptyList(),
     // Expressive UI Settings
     val themeMode: Int = 0, // 0 = System, 1 = Light, 2 = Dark
     val dynamicColor: Boolean = true,
