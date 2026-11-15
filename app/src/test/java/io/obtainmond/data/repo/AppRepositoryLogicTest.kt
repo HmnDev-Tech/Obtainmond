@@ -2,6 +2,7 @@ package io.obtainmond.data.repo
 
 import io.obtainmond.data.model.FolderRule
 import io.obtainmond.data.model.TrackedApp
+import io.obtainmond.rust.SourceDescriptorDto
 import io.obtainmond.security.HttpFetchResponse
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
@@ -155,5 +156,47 @@ class AppRepositoryLogicTest {
             )
         )
         assertEquals(listOf("FOSS"), ruled.folders)
+    }
+
+    @Test
+    fun legacyGitHubPerPage15EndpointUpgradesAndResolvesLatestFallback() {
+        val desc = SourceDescriptorDto(
+            sourceType = "GITHUB",
+            canonicalUrl = "https://github.com/Riteshp2001/mpvRx",
+            apiUrl = "https://api.github.com/repos/Riteshp2001/mpvRx/releases?per_page=100",
+            owner = "Riteshp2001",
+            repo = "mpvRx"
+        )
+
+        assertEquals(
+            "https://api.github.com/repos/Riteshp2001/mpvRx/releases?per_page=100",
+            AppRepository.resolveEffectiveApiEndpoint(
+                "https://api.github.com/repos/Riteshp2001/mpvRx/releases?per_page=15",
+                desc
+            )
+        )
+        assertEquals(
+            "https://api.github.com/repos/Riteshp2001/mpvRx/releases?per_page=100",
+            AppRepository.resolveEffectiveApiEndpoint(
+                "https://api.github.com/repos/Riteshp2001/mpvRx/releases",
+                desc
+            )
+        )
+        assertEquals(
+            "https://api.github.com/repos/Riteshp2001/mpvRx/releases/latest",
+            AppRepository.resolveGitHubLatestFallbackUrl(
+                desc = desc,
+                usedEndpoint = desc.apiUrl,
+                includePrereleases = false
+            )
+        )
+        assertEquals(
+            null,
+            AppRepository.resolveGitHubLatestFallbackUrl(
+                desc = desc,
+                usedEndpoint = desc.apiUrl,
+                includePrereleases = true
+            )
+        )
     }
 }

@@ -14,6 +14,7 @@ import io.obtainmond.data.model.PrivilegeBackendMode
 import io.obtainmond.data.model.TrackedApp
 import io.obtainmond.privilege.PrivilegeManager
 import io.obtainmond.rust.ObtainmondNative
+import io.obtainmond.rust.SourceDescriptorDto
 import io.obtainmond.security.ApkSignatureVerifier
 import io.obtainmond.security.HttpFetchResponse
 import io.obtainmond.security.SplitBundleExtractor
@@ -195,7 +196,7 @@ object AppRepository {
                         author = "HmnDev-Tech",
                         url = "https://github.com/HmnDev-Tech/Shevery",
                         sourceType = "GITHUB",
-                        apiUrl = "https://api.github.com/repos/HmnDev-Tech/Shevery/releases?per_page=15",
+                        apiUrl = "https://api.github.com/repos/HmnDev-Tech/Shevery/releases?per_page=100",
                         categories = listOf("Privilege", "System")
                     ),
                     TrackedApp(
@@ -204,7 +205,7 @@ object AppRepository {
                         author = "HmnDev-Tech",
                         url = "https://github.com/HmnDev-Tech/Obtainmond",
                         sourceType = "GITHUB",
-                        apiUrl = "https://api.github.com/repos/HmnDev-Tech/Obtainmond/releases?per_page=15",
+                        apiUrl = "https://api.github.com/repos/HmnDev-Tech/Obtainmond/releases?per_page=100",
                         categories = listOf("Updater")
                     )
                 )
@@ -739,39 +740,105 @@ object AppRepository {
         }.awaitAll()
     }
 
+    internal fun resolveEffectiveApiEndpoint(storedApiUrl: String, desc: SourceDescriptorDto): String {
+        val trimmed = storedApiUrl.trim()
+        if (trimmed.isBlank()) return desc.apiUrl
+        val lower = trimmed.lowercase()
+        val isLegacyGitHub = desc.sourceType == "GITHUB" &&
+            lower.startsWith("https://api.github.com/repos/") &&
+            (lower.endsWith("/releases") || lower.endsWith("/releases?per_page=15"))
+        if (isLegacyGitHub) return desc.apiUrl
+
+        val isLegacyForge = desc.sourceType in setOf("CODEBERG", "FORGEJO", "GITEA") &&
+            (lower.endsWith("/releases") || lower.endsWith("/releases?limit=15"))
+        if (isLegacyForge) return desc.apiUrl
+
+        return trimmed
+    }
+
+    internal fun resolveGitHubLatestFallbackUrl(
+        desc: SourceDescriptorDto,
+        usedEndpoint: String,
+        includePrereleases: Boolean
+    ): String? {
+        if (desc.sourceType != "GITHUB" || includePrereleases) return null
+        if (desc.owner.isBlank() || desc.owner == "unknown" || desc.repo.isBlank() || desc.repo == "unknown") {
+            return null
+        }
+        val cleanUsed = usedEndpoint.trimEnd('/').lowercase()
+        if (cleanUsed.endsWith("/releases/latest")) return null
+        return "https://api.github.com/repos/${desc.owner}/${desc.repo}/releases/latest"
+    }
+
     /**
      * Queries the upstream release API and runs the Rust release parser + Rust smart ABI APK selector.
      */
     suspend fun fetchLatestReleaseForApp(app: TrackedApp): TrackedApp = withContext(Dispatchers.IO) {
         val desc = ObtainmondNative.resolveSource(app.url)
-        val endpoint = app.apiUrl.ifBlank { desc.apiUrl }
+        val endpoint = resolveEffectiveApiEndpoint(app.apiUrl, desc)
         val currentSettings = _settings.value
+        val secrets = if (desc.sourceType != "DIRECT_APK" && ::secretStore.isInitialized) {
+            secretStore.load()
+        } else {
+            StoredSecrets()
+        }
+        val httpCaller: (String, Map<String, String>) -> HttpFetchResponse = { url, headers ->
+            val rb = Request.Builder().url(url)
+            headers.forEach { (k, v) -> rb.header(k, v) }
+            httpClient.newCall(rb.build()).execute().use { resp ->
+                HttpFetchResponse(resp.code, resp.body.string())
+            }
+        }
 
         val payload = if (desc.sourceType == "DIRECT_APK") {
             ""
         } else {
-            val secrets = if (::secretStore.isInitialized) secretStore.load() else StoredSecrets()
             fetchEndpointWithTokenRotation(
                 endpoint = endpoint,
                 sourceType = desc.sourceType,
                 githubTokens = secrets.githubTokens,
                 gitlabToken = secrets.gitlabToken,
-                tokenCursor = githubTokenCursor
-            ) { url, headers ->
-                val rb = Request.Builder().url(url)
-                headers.forEach { (k, v) -> rb.header(k, v) }
-                httpClient.newCall(rb.build()).execute().use { resp ->
-                    HttpFetchResponse(resp.code, resp.body.string())
-                }
-            }
+                tokenCursor = githubTokenCursor,
+                httpCaller = httpCaller
+            )
         }
 
-        val parsed = ObtainmondNative.parseRelease(
+        var parsed = ObtainmondNative.parseRelease(
             sourceType = desc.sourceType,
             payload = payload,
             includePrereleases = app.includePrereleases,
             fallbackUrl = app.url
         )
+
+        if (parsed.error != null) {
+            val latestFallbackUrl = resolveGitHubLatestFallbackUrl(
+                desc = desc,
+                usedEndpoint = endpoint,
+                includePrereleases = app.includePrereleases
+            )
+            if (latestFallbackUrl != null) {
+                runCatching {
+                    val latestPayload = fetchEndpointWithTokenRotation(
+                        endpoint = latestFallbackUrl,
+                        sourceType = desc.sourceType,
+                        githubTokens = secrets.githubTokens,
+                        gitlabToken = secrets.gitlabToken,
+                        tokenCursor = githubTokenCursor,
+                        httpCaller = httpCaller
+                    )
+                    ObtainmondNative.parseRelease(
+                        sourceType = desc.sourceType,
+                        payload = latestPayload,
+                        includePrereleases = app.includePrereleases,
+                        fallbackUrl = app.url
+                    )
+                }.getOrNull()?.let { latestParsed ->
+                    if (latestParsed.error == null) {
+                        parsed = latestParsed
+                    }
+                }
+            }
+        }
 
         if (parsed.error != null) {
             if (app.id == appContext.packageName && app.installedVersion.isNotBlank()) {

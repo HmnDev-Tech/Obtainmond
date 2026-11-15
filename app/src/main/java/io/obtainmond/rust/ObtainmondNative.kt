@@ -357,7 +357,7 @@ object ObtainmondNative {
                     owner = owner,
                     repo = repo,
                     canonicalUrl = "https://github.com/$owner/$repo",
-                    apiUrl = "https://api.github.com/repos/$owner/$repo/releases",
+                    apiUrl = "https://api.github.com/repos/$owner/$repo/releases?per_page=100",
                     appNameHint = repo
                 )
             }
@@ -393,7 +393,7 @@ object ObtainmondNative {
                     owner = owner,
                     repo = repo,
                     canonicalUrl = "$scheme://$rawHost/$owner/$repo",
-                    apiUrl = "$scheme://$rawHost/api/v1/repos/$owner/$repo/releases",
+                    apiUrl = "$scheme://$rawHost/api/v1/repos/$owner/$repo/releases?limit=50",
                     appNameHint = repo
                 )
             }

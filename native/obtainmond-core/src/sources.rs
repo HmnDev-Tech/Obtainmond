@@ -136,7 +136,7 @@ pub fn resolve_source_descriptor(raw_url: &str) -> SourceDescriptor {
             source_type: "GITHUB".to_string(),
             canonical_url: format!("https://github.com/{}/{}", owner, repo),
             api_url: format!(
-                "https://api.github.com/repos/{}/{}/releases?per_page=15",
+                "https://api.github.com/repos/{}/{}/releases?per_page=100",
                 owner, repo
             ),
             app_name_hint: repo.clone(),
@@ -177,7 +177,7 @@ pub fn resolve_source_descriptor(raw_url: &str) -> SourceDescriptor {
             source_type: stype.to_string(),
             canonical_url: format!("{}://{}/{}/{}", scheme, host, owner, repo),
             api_url: format!(
-                "{}://{}/api/v1/repos/{}/{}/releases?limit=15",
+                "{}://{}/api/v1/repos/{}/{}/releases?limit=50",
                 scheme, host, owner, repo
             ),
             app_name_hint: repo.clone(),
@@ -1465,5 +1465,52 @@ mod tests {
         let res = parse_release_payload("GITHUB", gh, false, "https://github.com/a/b").unwrap();
         assert_eq!(res.version, "1.5.0");
         assert_eq!(res.apk_assets[0].name, "app-release.apks");
+    }
+
+    #[test]
+    fn github_skips_many_prereleases_and_accepts_latest_single_object() {
+        let desc = resolve_source_descriptor("https://github.com/Riteshp2001/mpvRx");
+        assert_eq!(desc.source_type, "GITHUB");
+        assert_eq!(
+            desc.api_url,
+            "https://api.github.com/repos/Riteshp2001/mpvRx/releases?per_page=100"
+        );
+
+        let mut releases = Vec::new();
+        for idx in 0..20 {
+            releases.push(format!(
+                r#"{{"tag_name":"experimental-r22{}","name":"mpvRx Experimental","prerelease":true,"draft":false,"body":"exp","assets":[{{"name":"mpvRx-exp-arm64-v8a.apk","browser_download_url":"https://github.com/Riteshp2001/mpvRx/releases/download/exp/mpvRx-exp-arm64-v8a.apk","size":1000}}]}}"#,
+                idx
+            ));
+        }
+        releases.push(
+            r###"{"tag_name":"v3.0.2","name":"mpvRx v3.0.2","prerelease":false,"draft":false,"body":"## Changelog\n- Fixes","published_at":"2026-10-01T00:00:00Z","assets":[{"name":"mpvRx-playstore-v3.0.2.aab","browser_download_url":"https://github.com/Riteshp2001/mpvRx/releases/download/v3.0.2/mpvRx-playstore-v3.0.2.aab","size":1000},{"name":"mpvRx-arm64-v8a-v3.0.2.apk","browser_download_url":"https://github.com/Riteshp2001/mpvRx/releases/download/v3.0.2/mpvRx-arm64-v8a-v3.0.2.apk","size":2000},{"name":"mpvRx-universal-v3.0.2.apk","browser_download_url":"https://github.com/Riteshp2001/mpvRx/releases/download/v3.0.2/mpvRx-universal-v3.0.2.apk","size":3000}]}"###.to_string(),
+        );
+        let payload = format!("[{}]", releases.join(","));
+
+        let parsed = parse_release_payload(
+            "GITHUB",
+            &payload,
+            false,
+            "https://github.com/Riteshp2001/mpvRx",
+        )
+        .unwrap();
+        assert_eq!(parsed.version, "3.0.2");
+        assert_eq!(parsed.raw_tag, "v3.0.2");
+        assert_eq!(parsed.changelog, "## Changelog\n- Fixes");
+        assert_eq!(parsed.apk_assets.len(), 2);
+        assert!(parsed.apk_assets.iter().all(|a| a.name.ends_with(".apk")));
+
+        // Verify /releases/latest single JSON object fallback format
+        let single_latest = r#"{"tag_name":"v3.0.2","name":"mpvRx v3.0.2","prerelease":false,"draft":false,"body":"Single object notes","assets":[{"name":"mpvRx-arm64-v8a-v3.0.2.apk","browser_download_url":"https://github.com/Riteshp2001/mpvRx/releases/download/v3.0.2/mpvRx-arm64-v8a-v3.0.2.apk","size":2000}]}"#;
+        let single_parsed = parse_release_payload(
+            "GITHUB",
+            single_latest,
+            false,
+            "https://github.com/Riteshp2001/mpvRx",
+        )
+        .unwrap();
+        assert_eq!(single_parsed.version, "3.0.2");
+        assert_eq!(single_parsed.changelog, "Single object notes");
     }
 }
