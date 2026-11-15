@@ -22,10 +22,7 @@ android {
         sign
     }
     buildTypes {
-        // Both debug and release share applicationId "io.obtainmond" and signingConfigs.sign
-        // so switching between debug and release APKs never requires uninstalling.
         debug {
-            signingConfig signingConfigs.sign
             debuggable true
         }
         release {
@@ -141,4 +138,11 @@ dependencies {
     debugImplementation 'androidx.compose.ui:ui-tooling'
 
     implementation 'com.squareup.okhttp3:okhttp:5.5.1'
+    implementation 'com.google.crypto.tink:tink-android:1.24.0'
+    implementation 'com.android.tools.build:apksig:9.5.1'
+    implementation 'com.mikepenz:multiplatform-markdown-renderer-m3:0.45.0'
+    implementation 'io.github.iamr0s:Dhizuku-API:2.7.0'
+
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0'
 }

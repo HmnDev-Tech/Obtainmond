@@ -1,60 +1,92 @@
-def ksFile = rootProject.file('signing.properties')
-def props = new Properties()
-
-def configureUnifiedFallback = {
-    def fallbackBase64 = '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'
-    def fallbackKeystore = rootProject.file('build/obtainmond-unified.jks')
-    def decodedBytes = java.util.Base64.decoder.decode(fallbackBase64)
-    if (!fallbackKeystore.exists() || !java.util.Arrays.equals(fallbackKeystore.bytes, decodedBytes)) {
-        fallbackKeystore.parentFile.mkdirs()
-        fallbackKeystore.bytes = decodedBytes
+def resolveKeystorePath = { String ksPath ->
+    if (ksPath == null || ksPath.isBlank()) {
+        return null
     }
-    android.signingConfigs.sign.storeFile fallbackKeystore
-    android.signingConfigs.sign.storePassword 'obtainmond123'
-    android.signingConfigs.sign.keyAlias 'obtainmond'
-    android.signingConfigs.sign.keyPassword 'obtainmond123'
+    def direct = new File(ksPath)
+    if (direct.isAbsolute() && direct.exists()) {
+        return direct
+    }
+    def fromRoot = rootProject.file(ksPath)
+    if (fromRoot.exists()) {
+        return fromRoot
+    }
+    def fromProject = file(ksPath)
+    return fromProject.exists() ? fromProject : fromRoot
 }
 
+def props = new Properties()
+def ksFile = rootProject.file('signing.properties')
 if (ksFile.canRead()) {
-    props.load(new FileInputStream(ksFile))
+    ksFile.withInputStream { stream -> props.load(stream) }
+}
 
-    def ksPath = props['KEYSTORE_FILE']
-    File targetKeystore = null
-    if (ksPath != null && !ksPath.isBlank()) {
-        def f1 = new File(ksPath)
-        if (f1.isAbsolute() && f1.exists()) {
-            targetKeystore = f1
-        } else {
-            def fRoot = rootProject.file(ksPath)
-            if (fRoot.exists()) {
-                targetKeystore = fRoot
-            } else {
-                def fLocal = file(ksPath)
-                if (fLocal.exists()) {
-                    targetKeystore = fLocal
-                } else {
-                    targetKeystore = fRoot
-                }
-            }
+def envOrProp = { List<String> keys ->
+    for (String key : keys) {
+        def p = props.getProperty(key)
+        if (p != null && !p.isBlank()) {
+            return p.trim()
+        }
+        def e = System.getenv(key)
+        if (e != null && !e.isBlank()) {
+            return e.trim()
         }
     }
-
-    def keyAlias = props['KEY_ALIAS'] ?: props['KEYSTORE_ALIAS']
-    def keyPass = props['KEY_PASSWORD'] ?: props['KEYSTORE_ALIAS_PASSWORD']
-    def storePass = props['KEYSTORE_PASSWORD'] ?: props['SIGNING_STORE_PASSWORD']
-
-    if (targetKeystore != null && targetKeystore.exists() && keyAlias != null && storePass != null) {
-        android.signingConfigs.sign.storeFile targetKeystore
-        android.signingConfigs.sign.storePassword storePass
-        android.signingConfigs.sign.keyAlias keyAlias
-        android.signingConfigs.sign.keyPassword (keyPass ?: storePass)
-    } else {
-        configureUnifiedFallback()
-    }
-} else {
-    configureUnifiedFallback()
+    return null
 }
 
-android.signingConfigs.sign.enableV1Signing = true
-android.signingConfigs.sign.enableV2Signing = true
-android.signingConfigs.sign.enableV3Signing = true
+def ksPath = envOrProp(['KEYSTORE_FILE', 'SIGNING_KEYSTORE_FILE'])
+def ksBase64 = envOrProp(['KEYSTORE_BASE64', 'SIGNING_KEYSTORE_BASE64'])
+def storePass = envOrProp(['KEYSTORE_PASSWORD', 'SIGNING_STORE_PASSWORD', 'SIGNING_KEYSTORE_PASSWORD'])
+def keyAliasVal = envOrProp(['KEY_ALIAS', 'KEYSTORE_ALIAS', 'SIGNING_KEY_ALIAS'])
+def keyPass = envOrProp(['KEY_PASSWORD', 'KEYSTORE_ALIAS_PASSWORD', 'SIGNING_KEY_PASSWORD'])
+
+File targetKeystore = resolveKeystorePath(ksPath)
+if ((targetKeystore == null || !targetKeystore.exists()) && ksBase64 != null) {
+    def decoded = java.util.Base64.decoder.decode(ksBase64.replaceAll('\\s+', ''))
+    def envKeystore = new File(rootProject.layout.buildDirectory.asFile.get(), 'signing/env-keystore.jks')
+    envKeystore.parentFile.mkdirs()
+    if (!envKeystore.exists() || !java.util.Arrays.equals(envKeystore.bytes, decoded)) {
+        envKeystore.bytes = decoded
+    }
+    targetKeystore = envKeystore
+}
+
+def hasSigningConfig = (targetKeystore != null && targetKeystore.exists() && keyAliasVal != null && storePass != null)
+
+if (hasSigningConfig) {
+    android.signingConfigs.sign.storeFile = targetKeystore
+    android.signingConfigs.sign.storePassword = storePass
+    android.signingConfigs.sign.keyAlias = keyAliasVal
+    android.signingConfigs.sign.keyPassword = (keyPass ?: storePass)
+    android.signingConfigs.sign.enableV1Signing = true
+    android.signingConfigs.sign.enableV2Signing = true
+    android.signingConfigs.sign.enableV3Signing = true
+    android.buildTypes.debug.signingConfig = android.signingConfigs.sign
+    android.buildTypes.release.signingConfig = android.signingConfigs.sign
+} else {
+    android.buildTypes.debug.signingConfig = android.signingConfigs.debug
+    android.buildTypes.release.signingConfig = null
+}
+
+def missingConfigMessage = "Release signing is not configured. Provide signing.properties (KEYSTORE_FILE, KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD) or set KEYSTORE_FILE / KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS, and KEY_PASSWORD environment variables."
+
+rootProject.ext.releaseSigningConfigured = hasSigningConfig
+
+gradle.taskGraph.whenReady { graph ->
+    def needsReleaseSigning = graph.allTasks.any { t ->
+        t.project == project && t.name in ['packageRelease', 'assembleRelease', 'bundleRelease', 'packageReleaseBundle']
+    }
+    if (needsReleaseSigning && !hasSigningConfig) {
+        throw new GradleException(missingConfigMessage)
+    }
+}
+
+tasks.matching {
+    it.name in ['validateSigningRelease', 'packageRelease', 'assembleRelease', 'bundleRelease']
+}.configureEach {
+    doFirst {
+        if (!hasSigningConfig) {
+            throw new GradleException(missingConfigMessage)
+        }
+    }
+}

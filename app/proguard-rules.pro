@@ -23,3 +23,11 @@
 -dontwarn com.hamondev.shevery.api.**
 -dontwarn okhttp3.**
 -dontwarn okio.**
+-dontwarn com.google.errorprone.annotations.**
+-dontwarn javax.annotation.**
+-dontwarn org.conscrypt.**
+-dontwarn org.bouncycastle.**
+-dontwarn org.openjsse.**
+
+-keep class com.google.crypto.tink.** { *; }
+-keep class com.android.apksig.** { *; }

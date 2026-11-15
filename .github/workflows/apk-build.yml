@@ -93,18 +93,30 @@ jobs:
           KEY_PASSWORD=$KEY_PASSWORD
           EOF
           else
-            echo "Secrets absent; using deterministic embedded unified keystore from signing.gradle"
+            echo "Signing secrets absent; release build will be skipped and debug/unit tests only will run."
             rm -f signing.properties keystore.jks
+            echo "HAS_SIGNING_SECRETS=false" >> $GITHUB_ENV
+          fi
+          if [ -f signing.properties ]; then
+            echo "HAS_SIGNING_SECRETS=true" >> $GITHUB_ENV
           fi
 
-      - name: Build Debug & Release APKs
+      - name: Run Rust Core Tests
+        run: cargo test --manifest-path native/Cargo.toml
+
+      - name: Build Debug & Release APKs & Run Unit Tests
         env:
           SKIP_GRADLE_RUST_BUILD: "true"
         run: |
           chmod +x gradlew
-          ./gradlew :app:assembleDebug :app:assembleRelease --no-daemon --stacktrace
+          if [ "$HAS_SIGNING_SECRETS" = "true" ]; then
+            ./gradlew :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease --no-daemon --stacktrace
+          else
+            ./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon --stacktrace
+          fi
 
       - name: Verify Identical Signing Certificate Across Debug & Release APKs
+        if: env.HAS_SIGNING_SECRETS == 'true'
         run: |
           APKSIGNER=$(ls -d "$ANDROID_SDK_ROOT"/build-tools/*/apksigner | sort -V | tail -n1)
           echo "Using apksigner: $APKSIGNER"
@@ -144,6 +156,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload Release APK
+        if: env.HAS_SIGNING_SECRETS == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: obtainmond-release
