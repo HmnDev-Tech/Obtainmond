@@ -3,81 +3,66 @@
 [![APK Build](https://github.com/HmnDev-Tech/Obtainmond/actions/workflows/apk-build.yml/badge.svg)](https://github.com/HmnDev-Tech/Obtainmond/actions/workflows/apk-build.yml)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
-**Get Android app updates straight from the source — fully automated, zero-touch, and blazing fast.**
+**Get Android app updates straight from the source — fully automated, zero-touch, and verified before installation.**
 
-**Obtainmond** is a native **Kotlin (Jetpack Compose Material 3 Expressive)** and **Rust (`libobtainmond_core.so`)** evolution of Obtainium. Powered by native **Shevery-API (`v14.6.4`)** and **Shizuku**, Obtainmond bypasses Android battery optimizations to silently update your applications in the background on the fly — automatically selecting the exact APK variant that matches your device architecture without requiring user confirmation.
+**Obtainmond** is a native **Kotlin (Jetpack Compose Material 3 Expressive)** and **Rust (`libobtainmond_core.so`)** evolution of Obtainium. Powered by native **Shevery-API (`v14.6.4`)**, **Shizuku**, **Dhizuku**, **Root**, and Android `PackageInstaller`, Obtainmond bypasses Android battery optimizations to update your applications cleanly — automatically selecting the exact APK or split-APK bundle matching your device architecture and verifying cryptographic signatures and certificates before installing.
 
 ---
 
-## 🚀 Why Obtainmond? (Key Improvements over Obtainium)
+## 🚀 Key Improvements & Architecture
 
 | Feature | Upstream Obtainium | Obtainmond (`io.obtainmond`) |
 | :--- | :--- | :--- |
-| **Core Architecture** | Flutter / Dart interpreter | **Native Android (Kotlin + Jetpack Compose) + Rust Core (`libobtainmond_core.so`)** |
-| **Multi-APK Background Updates** | ❌ **Fails**. Silently aborts if a release has >1 APK asset | ✅ **Automated**. Rust Smart ABI Selector matches your installed app's ABI and flavor |
-| **Zero-Touch Background Updates** | ⚠️ Often killed by Android Doze/battery limits | ✅ **Privileged Doze Bypass**. Whitelists itself via Shevery/Shizuku on the fly |
-| **Privilege Backend** | Shizuku legacy binder only | ✅ **Dual Backend**: High-speed **Shevery-API v14.6.4** (`execFast()`) + **Shizuku** + **Root** |
-| **User Interface** | Standard Flutter Material | ✅ **Material 3 Expressive** (`MotionScheme.expressive()`), floating pill bar, AGSL motion blur |
-| **Time-Machine Rollback** | ❌ None | ✅ **Instant Rollback**. Snapshots `base.apk` before updates; 1-click downgrade (`pm install -r -d`) |
-| **ART Optimization** | ❌ None | ✅ **Post-Install Dexopt**. Runs `cmd package compile -m speed-profile` for zero JIT lag |
-| **Security & Integrity** | Basic SHA256 in Dart | ✅ **Rust ABI & Signature Guard**. Inspects APK ZIP Central Directory before install |
-| **Debug & Release Builds** | Different keys (requires reinstall) | ✅ **Unified Signing**. Debug and release builds share the exact same key |
+| **Core Architecture** | Flutter / Dart | **Native Android (Kotlin + Jetpack Compose) + Rust Core (`libobtainmond_core.so`)** |
+| **Multi-APK & Split Bundles** | Prompted on splits | **Automated**. Rust Smart ABI Selector matches ABIs and unpacks `.apks` / `.xapk` / `.apkm` / `.apk.zip` |
+| **Zero-Touch Background Updates** | Standard Android scheduling | **Privileged Doze Bypass**. Whitelists itself via Shevery/Shizuku on the fly |
+| **Privilege & Installer Backends** | Shizuku + PackageInstaller | **Shevery-API v14.6.4** (`execFast()`), **Shizuku**, **Dhizuku**, **Root**, **PackageInstaller**, & **External Installers** |
+| **User Interface** | Flutter Material | **Material 3 Expressive** (`MotionScheme.expressive()`), adaptive tablet rail + 2-pane layout, AGSL motion blur |
+| **Time-Machine Rollback** | None | **Instant Rollback**. Snapshots `base.apk` and all split APKs before updates; diagnoses Android 7+ downgrade limits |
+| **ART Optimization** | None | **Post-Install Dexopt**. Runs `cmd package compile -m speed-profile` after updates |
+| **Security & Integrity** | Basic SHA-256 check | **Rust ZIP Central Directory & APK Signing Block Guard + `apksig` + Cert SHA-256 Pinning + Tink/Keystore Encrypted PATs** |
+| **Supply-Chain Verification** | None | **F-Droid / IzzyOnDroid Reproducible Builds**, **GitHub Release Attestations**, & optional **VirusTotal** hash lookup |
 
 ---
 
 ## 📦 Supported App Sources
 
-Obtainmond tracks, parses, and downloads updates directly from a vast range of sources:
+Obtainmond implements dedicated structured Rust parsers in `native/obtainmond-core/src/sources.rs` for:
 
-- **Open Source Repositories (Native Rust Parsers)**:
-  - [GitHub](https://github.com/) (Full Release API + mirror acceleration + personal access token pool)
-  - [GitLab](https://gitlab.com/) (Direct asset links + markdown release parser)
-  - [Forgejo](https://forgejo.org/) / [Codeberg](https://codeberg.org/) (Native API v1)
-  - [F-Droid](https://f-droid.org/) (Official Index v1 API)
-  - Third-Party F-Droid Repositories
-  - [IzzyOnDroid](https://android.izzysoft.de/)
-  - [SourceHut](https://git.sr.ht/)
-- **General App Stores & Mirrors**:
-  - [APKPure](https://apkpure.net/)
-  - [Aptoide](https://aptoide.com/)
-  - [Uptodown](https://uptodown.com/)
-  - [itch.io](https://itch.io/)
-  - [Huawei AppGallery](https://appgallery.huawei.com/)
-  - [Tencent App Store](https://sj.qq.com/)
-  - [vivo App Store](https://h5.appstore.vivo.com.cn/)
-  - [RuStore](https://rustore.ru/)
-  - [Samsung Galaxy Store](https://galaxystore.samsung.com/)
-  - [SourceForge](https://sourceforge.net/)
-  - Jenkins CI Builds
-  - [APKMirror](https://apkmirror.com/) *(Track-Only)*
-- **Direct & Fallback Sources**:
-  - **Direct APK URL**: Direct link to any `.apk` file endpoint.
-  - **HTML Web Scraper (Rust Regex)**: Any HTML release page with `.apk` download links.
+- **Open Source Forges**:
+  - [GitHub](https://github.com/) (Full Releases API + encrypted PAT pool rotation + optional custom HTTPS mirror with strict signature enforcement)
+  - [GitLab](https://gitlab.com/) & self-hosted `gitlab.*` instances (v4 Project Releases API + Markdown link extraction)
+  - [Forgejo](https://forgejo.org/) / [Codeberg](https://codeberg.org/) / [Gitea](https://gitea.com/) (Native v1 Releases API)
+  - [F-Droid Official](https://f-droid.org/) (v1 API + Reproducible Builds verification log check)
+  - **Third-Party F-Droid Repositories** (`index-v1.json` & `index-v2.json` structured parsers)
+  - [IzzyOnDroid](https://apt.izzysoft.de/) (Native index/API parser + Codeberg `rbtlog` Reproducible Builds verification)
+- **App Stores & CI Feeds**:
+  - [Aptoide](https://aptoide.com/) (`ws75.aptoide.com` API v7 metadata & search parser)
+  - [RuStore](https://rustore.ru/) (`backapi.rustore.ru` app info & v2 download-link resolution)
+  - [SourceForge](https://sourceforge.net/) (Project RSS feed XML parser)
+  - **Jenkins CI** (`lastSuccessfulBuild/api/json` build & artifact parser)
+- **Direct & Generic Sources**:
+  - **Direct Package URL**: Direct links to `.apk`, `.apks`, `.xapk`, `.apkm`, or `.apk.zip` files
+  - **HTML Web Scraper**: Fallback Rust regex extractor for release pages linking Android packages
 
 ---
 
-## 📥 Installation & Verification
+## 📥 Installation & Signing Security
 
-Download the latest APK directly from the [GitHub Releases](https://github.com/HmnDev-Tech/Obtainmond/releases) page or CI Artifacts.
-
-### Verification Information
 - **Package Name**: `io.obtainmond`
 - **Minimum Android Version**: Android 8.0 (API level 26)
-- **Target Android Version**: Android 15 (API level 35)
+- **Target / Compile SDK**: API level 37
 - **Supported Architectures**: `arm64-v8a`, `armeabi-v7a`, `x86_64`, `x86`
-- **Signing Keystore**: Unified key across both Debug and Release APKs — you can freely install debug builds over release builds without uninstalling!
+- **Signing**: Debug builds use standard debug signing unless configured locally via external `signing.properties`. Release builds require external `signing.properties` or environment variables (`KEYSTORE_FILE` / `KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`) and never fall back to any repository-embedded key.
 
 ---
 
-## 🔬 Obtainmond Labs
+## 🔬 Obtainmond Labs & Security Guards
 
-Obtainmond includes experimental power-user features:
-
-1. **Instant Rollback Time-Machine**: Automatically preserves the previous `base.apk` in a secure rollback vault before updating. Allows 1-tap silent downgrade (`pm install -r -d`) if a new release has bugs.
-2. **Post-Install ART Compiler**: Triggers Android's ART profile compiler (`cmd package compile -m speed-profile -f <pkg>`) immediately after silent updates, pre-compiling bytecode so apps open instantly.
-3. **Installer Package Spoofer**: Emulates installer provenance (`-i com.android.vending`, `com.sec.android.app.samsungapps`, or `org.fdroid.fdroid`) to preserve store compatibility and bypass integrity checks.
-4. **Privileged App Freezer**: Suspend or quarantine tracked applications on demand via privileged `pm suspend`.
-5. **Rust ABI & Signature Guard**: Uses `libobtainmond_core.so` to parse APK ZIP headers and verify that native `.so` libraries match your device CPU architecture before privileged installation.
+1. **APK ZIP Central Directory & Signing Block Guard**: `libobtainmond_core.so` parses the real ZIP Central Directory (`AndroidManifest.xml`, `lib/<abi>/*.so`) and EOCD + APK Signing Block v2/v3, paired with Google `apksig` full cryptographic verification and SHA-256 signing certificate pinning on every update.
+2. **Instant Rollback Time-Machine**: Preserves `base.apk` and all installed split APKs in `rollback_vault/` before updating, with clear diagnostics when Android 7+ blocks downgrading non-debuggable release apps without root bypass modules.
+3. **Post-Install ART Compiler**: Triggers Android's ART profile compiler (`cmd package compile -m speed-profile -f <pkg>`) immediately after silent updates.
+4. **Supply-Chain Verification**: Optional `Off` / `Audit` / `Enforce` verification against F-Droid & IzzyOnDroid Reproducible Builds, GitHub Release Attestations, and VirusTotal v3 file hash checks.
 
 ---
 
@@ -85,35 +70,38 @@ Obtainmond includes experimental power-user features:
 
 ### Prerequisites
 - JDK 21 (Temurin or OpenJDK)
-- Android SDK (API 35/36) & Android NDK (r26 or r27)
+- Android SDK (API 37) & Android NDK
 - Rust (stable toolchain) with Android targets:
   ```bash
   rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
   cargo install cargo-ndk --locked
   ```
 
-### Build Commands
+### Build & Test Commands
 ```bash
-# 1. Build Rust core libraries
+# 1. Verify & test Rust core
+cargo test --manifest-path native/Cargo.toml
+
+# 2. Cross-compile libobtainmond_core.so for all Android ABIs
 cd native
 cargo ndk -t arm64-v8a -t armeabi-v7a -t x86 -t x86_64 --platform 26 -o ../app/src/main/jniLibs build --release -p obtainmond-core
 cd ..
 
-# 2. Build Debug and Release APKs
-./gradlew :app:assembleDebug :app:assembleRelease
-```
+# 3. Run unit tests and build Debug APK
+./gradlew :app:testDebugUnitTest :app:assembleDebug
 
-Output APKs will be located in `app/build/outputs/apk/debug/` and `app/build/outputs/apk/release/`.
+# 4. Build Release APK (requires external signing.properties or env vars)
+./gradlew :app:assembleRelease
+```
 
 ---
 
 ## 🤝 Contributing & Community
 
-We welcome contributions! Please review our guidelines before submitting code:
-- [Contributing Guide](CONTRIBUTING.md) — How to set up your environment, code style, and PR process.
-- [Code of Conduct](CODE_OF_CONDUCT.md) — Our community standards.
-- [Security Policy](SECURITY.md) — How to report vulnerabilities responsibly.
-- [Issue Templates](.github/ISSUE_TEMPLATE/) — Bug reports and feature proposals.
+- [Contributing Guide](CONTRIBUTING.md)
+- [Code of Conduct](CODE_OF_CONDUCT.md)
+- [Security Policy](SECURITY.md)
+- [Issue Templates](.github/ISSUE_TEMPLATE/)
 
 ---
 
