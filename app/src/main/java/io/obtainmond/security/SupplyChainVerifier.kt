@@ -345,7 +345,7 @@ class SupplyChainVerifier(
             return SupplyChainVerifier { url, headers ->
                 val rb = Request.Builder()
                     .url(url)
-                    .header("User-Agent", "Obtainmond/2.5.0 (Android; SupplyChainGuard)")
+                    .header("User-Agent", "Obtainmond/2.5.1 (Android; SupplyChainGuard)")
                 for ((k, v) in headers) {
                     rb.header(k, v)
                 }

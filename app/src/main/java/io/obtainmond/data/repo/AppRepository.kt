@@ -682,7 +682,7 @@ object AppRepository {
         httpCaller: (url: String, headers: Map<String, String>) -> HttpFetchResponse
     ): String {
         val baseHeaders = mutableMapOf(
-            "User-Agent" to "Obtainmond/2.5.0 (Android; RustCore)",
+            "User-Agent" to "Obtainmond/2.5.1 (Android; RustCore)",
             "Accept" to "application/json, text/html, application/xml;q=0.9, */*;q=0.8"
         )
         if (sourceType == "RUSTORE") {
@@ -959,7 +959,7 @@ object AppRepository {
         val payload = """{"appId":$appId,"firstInstall":true}"""
         val req = Request.Builder()
             .url("https://backapi.rustore.ru/applicationData/v2/download-link")
-            .header("User-Agent", "Obtainmond/2.5.0 (Android; RuStoreClient)")
+            .header("User-Agent", "Obtainmond/2.5.1 (Android; RuStoreClient)")
             .header("ruStoreVerCode", "110802")
             .header("Content-Type", "application/json")
             .post(payload.toRequestBody("application/json; charset=utf-8".toMediaType()))
@@ -1030,7 +1030,7 @@ object AppRepository {
 
             val req = Request.Builder()
                 .url(effectiveUrl)
-                .header("User-Agent", "Obtainmond/2.5.0 (Android; RustCore)")
+                .header("User-Agent", "Obtainmond/2.5.1 (Android; RustCore)")
                 .build()
 
             httpClient.newCall(req).execute().use { resp ->
