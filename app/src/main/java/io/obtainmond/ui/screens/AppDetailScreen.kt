@@ -44,20 +44,26 @@ import androidx.compose.material.icons.rounded.AcUnit
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.Launch
 import androidx.compose.material.icons.rounded.PushPin
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Restore
+import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Science
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Shield
+import androidx.compose.material.icons.rounded.SkipNext
+import androidx.compose.material.icons.rounded.VerifiedUser
 import androidx.compose.material.icons.rounded.Visibility
+import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
@@ -87,16 +93,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.mikepenz.markdown.m3.Markdown
+import io.obtainmond.R
 import io.obtainmond.data.model.ObtainmondSettings
 import io.obtainmond.data.model.TrackedApp
 import io.obtainmond.data.repo.AppRepository
 import io.obtainmond.ui.compose.ExpressiveAppAvatar
 import io.obtainmond.ui.compose.ExpressiveShapeBadge
 import io.obtainmond.ui.compose.ExpressiveTonalButton
+import io.obtainmond.ui.compose.NavigationSettingsRow
 import io.obtainmond.ui.compose.SettingsGroup
 import io.obtainmond.ui.compose.SwitchSettingsRow
 import io.obtainmond.ui.compose.categoryAccentColor
@@ -123,6 +133,7 @@ fun AppDetailScreen(
     var showSplitMenu by remember { mutableStateOf(false) }
     var showEditDialog by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
+    var showFolderDialog by remember { mutableStateOf(false) }
     var showAllAssets by remember { mutableStateOf(false) }
     var expandChangelog by remember { mutableStateOf(true) }
 
@@ -269,6 +280,67 @@ fun AppDetailScreen(
                                     color = MaterialTheme.colorScheme.onSecondaryContainer,
                                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                                 )
+                            }
+                            app.folders.forEach { folder ->
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = MaterialTheme.colorScheme.tertiaryContainer
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            Icons.Rounded.Folder,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                                            modifier = Modifier.size(12.dp)
+                                        )
+                                        Spacer(Modifier.width(4.dp))
+                                        Text(
+                                            text = folder,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.onTertiaryContainer
+                                        )
+                                    }
+                                }
+                            }
+                            if (app.skippedVersion.isNotBlank()) {
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = MaterialTheme.colorScheme.surfaceContainerHighest
+                                ) {
+                                    Text(
+                                        text = "Skipped v${app.skippedVersion}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+                            if (app.lastSupplyChainSummary.isNotBlank()) {
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = MaterialTheme.colorScheme.primaryContainer
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            Icons.Rounded.VerifiedUser,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                            modifier = Modifier.size(12.dp)
+                                        )
+                                        Spacer(Modifier.width(4.dp))
+                                        Text(
+                                            text = app.lastSupplyChainSummary,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                                        )
+                                    }
+                                }
                             }
                             app.categories
                                 .filterNot { it.equals("Rust", ignoreCase = true) }
@@ -428,6 +500,29 @@ fun AppDetailScreen(
                                                 scope.launch { AppRepository.toggleFreezeApp(app.id) }
                                             }
                                         )
+                                        if (app.latestVersion.isNotBlank() &&
+                                            app.skippedVersion != app.latestVersion
+                                        ) {
+                                            val skipLabel = stringResource(R.string.action_skip_version, app.latestVersion)
+                                            DropdownMenuItem(
+                                                text = { Text(skipLabel) },
+                                                leadingIcon = { Icon(Icons.Rounded.SkipNext, contentDescription = null) },
+                                                onClick = {
+                                                    showSplitMenu = false
+                                                    AppRepository.skipVersion(app.id, app.latestVersion)
+                                                }
+                                            )
+                                        } else if (app.skippedVersion.isNotBlank()) {
+                                            val unskipLabel = stringResource(R.string.action_clear_skip, app.skippedVersion)
+                                            DropdownMenuItem(
+                                                text = { Text(unskipLabel) },
+                                                leadingIcon = { Icon(Icons.Rounded.SkipNext, contentDescription = null) },
+                                                onClick = {
+                                                    showSplitMenu = false
+                                                    AppRepository.skipVersion(app.id, "")
+                                                }
+                                            )
+                                        }
                                         if (app.backupApkPath.isNotBlank()) {
                                             DropdownMenuItem(
                                                 text = { Text("Rollback to v${app.backupVersion}") },
@@ -438,7 +533,7 @@ fun AppDetailScreen(
                                                         val ok = AppRepository.rollbackAppToBackup(app.id)
                                                         Toast.makeText(
                                                             context,
-                                                            if (ok) "Rolled back to v${app.backupVersion}" else "Rollback failed",
+                                                            if (ok) "Rolled back to v${app.backupVersion}" else "Rollback failed — see diagnostic alert",
                                                             Toast.LENGTH_SHORT
                                                         ).show()
                                                     }
@@ -460,6 +555,60 @@ fun AppDetailScreen(
                                     }
                                 }
                             }
+                        }
+                    }
+                }
+            }
+
+            if (app.needsAttention) {
+                item {
+                    Surface(
+                        shape = RoundedCornerShape(22.dp),
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                    Icon(
+                                        Icons.Rounded.WarningAmber,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onErrorContainer
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        text = "${stringResource(R.string.label_needs_attention)}: ${app.errorCategory.ifBlank { "ERROR" }}",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onErrorContainer
+                                    )
+                                }
+                                TextButton(onClick = { AppRepository.clearAppError(app.id) }) {
+                                    Icon(
+                                        Icons.Rounded.Close,
+                                        contentDescription = stringResource(R.string.action_dismiss_error),
+                                        tint = MaterialTheme.colorScheme.onErrorContainer,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(Modifier.width(4.dp))
+                                    Text(
+                                        stringResource(R.string.action_dismiss_error),
+                                        color = MaterialTheme.colorScheme.onErrorContainer
+                                    )
+                                }
+                            }
+                            Text(
+                                text = app.lastError,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
                         }
                     }
                 }
@@ -710,7 +859,7 @@ fun AppDetailScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Text(
-                                    text = "Release Notes",
+                                    text = stringResource(R.string.label_release_notes),
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -732,11 +881,11 @@ fun AppDetailScreen(
                                 }
                             }
                             AnimatedVisibility(visible = expandChangelog) {
-                                Text(
-                                    text = app.changelog,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(top = 8.dp)
+                                Markdown(
+                                    content = app.changelog,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 8.dp)
                                 )
                             }
                         }
@@ -752,11 +901,32 @@ fun AppDetailScreen(
                             SwitchSettingsRow(
                                 icon = Icons.Rounded.AutoAwesome,
                                 title = "Silent Background Auto-Update",
-                                subtitle = "Update automatically via Shevery/Shizuku",
+                                subtitle = "Update automatically via active privilege backend",
                                 checked = app.silentAutoUpdate,
                                 onCheckedChange = { enabled ->
                                     AppRepository.toggleSilentAutoUpdate(app.id, enabled)
                                 }
+                            )
+                        },
+                        {
+                            SwitchSettingsRow(
+                                icon = Icons.Rounded.Schedule,
+                                title = stringResource(R.string.label_on_demand_only),
+                                subtitle = stringResource(R.string.desc_on_demand_only),
+                                checked = app.onDemandOnly,
+                                shape = MaterialShapes.Circle,
+                                onCheckedChange = { enabled ->
+                                    AppRepository.setOnDemandOnly(app.id, enabled)
+                                }
+                            )
+                        },
+                        {
+                            NavigationSettingsRow(
+                                icon = Icons.Rounded.Folder,
+                                title = "Folders",
+                                subtitle = app.folders.joinToString(", ").ifBlank { "No folder assigned" },
+                                shape = MaterialShapes.Square,
+                                onClick = { showFolderDialog = true }
                             )
                         },
                         {
@@ -813,7 +983,7 @@ fun AppDetailScreen(
                             Icon(Icons.Rounded.Shield, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                             Spacer(Modifier.width(8.dp))
                             Text(
-                                text = "Integrity & Rollback Vault",
+                                text = "Integrity, Pinning & Rollback Vault",
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.Bold
                             )
@@ -824,6 +994,14 @@ fun AppDetailScreen(
                                 style = MaterialTheme.typography.bodySmall,
                                 fontFamily = FontFamily.Monospace,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        if (app.pinnedSigningCertSha256.isNotBlank()) {
+                            Text(
+                                text = "Pinned Signer: ${app.pinnedSigningCertSha256.take(24)}...",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace,
+                                color = MaterialTheme.colorScheme.primary
                             )
                         }
                         val lastCheckLabel = if (app.lastCheckedEpochMs > 0L) dateFmt.format(Date(app.lastCheckedEpochMs)) else "Never"
@@ -840,7 +1018,7 @@ fun AppDetailScreen(
                                         val ok = AppRepository.rollbackAppToBackup(app.id)
                                         Toast.makeText(
                                             context,
-                                            if (ok) "Rolled back to v${app.backupVersion}" else "Rollback failed",
+                                            if (ok) "Rolled back to v${app.backupVersion}" else "Rollback blocked — see diagnostic alert",
                                             Toast.LENGTH_SHORT
                                         ).show()
                                     }
@@ -850,11 +1028,52 @@ fun AppDetailScreen(
                                 Spacer(Modifier.width(6.dp))
                                 Text("Instant Rollback to v${app.backupVersion}")
                             }
+                            Text(
+                                text = stringResource(R.string.msg_rollback_android7_hint),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                     }
                 }
             }
         }
+    }
+
+    if (showFolderDialog) {
+        var folderInput by remember(app.id, app.folders) {
+            mutableStateOf(app.folders.joinToString(", "))
+        }
+        AlertDialog(
+            onDismissRequest = { showFolderDialog = false },
+            title = { Text("Assign Folders") },
+            text = {
+                OutlinedTextField(
+                    value = folderInput,
+                    onValueChange = { folderInput = it },
+                    label = { Text("Folders (comma-separated)") },
+                    placeholder = { Text("FOSS, Work, Privacy") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val list = folderInput.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                        AppRepository.setAppFolders(app.id, list)
+                        showFolderDialog = false
+                    }
+                ) {
+                    Text("Save")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showFolderDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 
     if (showEditDialog) {

@@ -1,4 +1,33 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Obtainmond</string>
+    <string name="tab_apps">Apps</string>
+    <string name="tab_add">Add App</string>
+    <string name="tab_import">Import</string>
+    <string name="tab_labs">Labs</string>
+    <string name="tab_settings">Settings</string>
+    <string name="filter_all">All</string>
+    <string name="filter_updates">Updates</string>
+    <string name="filter_installed">Installed</string>
+    <string name="filter_attention">Needs attention</string>
+    <string name="action_check_updates">Check all</string>
+    <string name="action_update_all">Update all</string>
+    <string name="action_bulk_import">Import installed</string>
+    <string name="action_dismiss_error">Dismiss</string>
+    <string name="action_skip_version">Skip v%1$s</string>
+    <string name="action_clear_skip">Un-skip v%1$s</string>
+    <string name="action_restore">Restore</string>
+    <string name="label_on_demand_only">On-Demand Only</string>
+    <string name="desc_on_demand_only">Skip background auto-checks; refresh only on manual demand</string>
+    <string name="label_needs_attention">Needs attention</string>
+    <string name="label_release_notes">Release Notes</string>
+    <string name="label_supply_chain">Supply-Chain Verification</string>
+    <string name="label_reproducible_builds">Reproducible Builds (F-Droid / Izzy)</string>
+    <string name="label_github_attestation">GitHub Provenance Attestations</string>
+    <string name="label_virustotal_check">VirusTotal Hash Check</string>
+    <string name="label_folder_rules">Auto-Folder Rules</string>
+    <string name="label_rollback_vault">Rollback Vault</string>
+    <string name="msg_rollback_android7_hint">Note: Android 7+ restricts in-place downgrades of non-debuggable release APKs without a privileged ADB/Root shell.</string>
+    <string name="msg_select_app_detail">Select an app from your library to inspect releases, changelog, and controls</string>
+    <string name="title_supported_sources">Verified Release Sources</string>
 </resources>

@@ -64,11 +64,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.obtainmond.R
 import io.obtainmond.data.model.ObtainmondSettings
 import io.obtainmond.data.repo.AppRepository
 import io.obtainmond.rust.ObtainmondNative
@@ -80,11 +82,15 @@ import kotlinx.coroutines.launch
 private val SUPPORTED_SOURCES = listOf(
     "GitHub",
     "GitLab",
-    "Codeberg",
+    "Forgejo / Codeberg",
     "F-Droid",
+    "3rd-Party F-Droid",
     "IzzyOnDroid",
-    "SourceHut",
-    "Direct APK",
+    "Aptoide",
+    "RuStore",
+    "SourceForge",
+    "Jenkins CI",
+    "Direct Package",
     "HTML"
 )
 
@@ -141,7 +147,7 @@ fun AddAppScreen(
         item {
             Column {
                 Text(
-                    text = "Add App",
+                    text = stringResource(R.string.tab_add),
                     style = MaterialTheme.typography.headlineLarge,
                     fontWeight = FontWeight.Black,
                     letterSpacing = (-0.5).sp

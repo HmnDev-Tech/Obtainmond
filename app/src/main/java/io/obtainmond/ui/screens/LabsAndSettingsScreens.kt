@@ -43,6 +43,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.automirrored.rounded.Send
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AspectRatio
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.BatteryChargingFull
@@ -56,6 +57,7 @@ import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.ErrorOutline
+import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.FolderCopy
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.ImportExport
@@ -72,6 +74,8 @@ import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.material.icons.rounded.Upload
 import androidx.compose.material.icons.rounded.VerifiedUser
+import androidx.compose.material.icons.rounded.Visibility
+import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -100,16 +104,22 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.obtainmond.BuildConfig
+import io.obtainmond.R
+import io.obtainmond.data.model.FolderRule
 import io.obtainmond.data.model.InstallerSpoofPreset
 import io.obtainmond.data.model.ObtainmondSettings
 import io.obtainmond.data.model.PrivilegeBackendMode
 import io.obtainmond.data.model.TrackedApp
+import io.obtainmond.data.model.VerificationPolicy
 import io.obtainmond.data.repo.AppRepository
 import io.obtainmond.privilege.PrivilegeManager
 import io.obtainmond.privilege.PrivilegeStatus
@@ -533,12 +543,20 @@ fun ObtainedLabsScreen(
 
         if (rollbackApps.isNotEmpty()) {
             item {
-                Text(
-                    text = "Rollback Vault (${rollbackApps.size})",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.ExtraBold,
-                    modifier = Modifier.padding(start = 4.dp)
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = "${stringResource(R.string.label_rollback_vault)} (${rollbackApps.size})",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.ExtraBold,
+                        modifier = Modifier.padding(start = 4.dp)
+                    )
+                    Text(
+                        text = stringResource(R.string.msg_rollback_android7_hint),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 4.dp)
+                    )
+                }
             }
             items(rollbackApps, key = { "rb_${it.id}" }) { app ->
                 Surface(
@@ -577,7 +595,7 @@ fun ObtainedLabsScreen(
                                     val ok = AppRepository.rollbackAppToBackup(app.id)
                                     Toast.makeText(
                                         context,
-                                        if (ok) "Rolled back ${app.name}" else "Rollback failed",
+                                        if (ok) "Rolled back ${app.name}" else "Rollback failed — see Logs / Attention",
                                         Toast.LENGTH_SHORT
                                     ).show()
                                 }
@@ -586,7 +604,7 @@ fun ObtainedLabsScreen(
                         ) {
                             Icon(Icons.Rounded.Restore, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(4.dp))
-                            Text("Restore")
+                            Text(stringResource(R.string.action_restore))
                         }
                     }
                 }
@@ -599,6 +617,8 @@ private enum class SettingsSubPage {
     ROOT,
     APPEARANCE,
     PRIVILEGE,
+    SECURITY,
+    FOLDER_RULES,
     IMPORT_EXPORT,
     GITHUB_NETWORK,
     LOGS,
@@ -648,6 +668,16 @@ fun SettingsScreen(
             SettingsSubPage.PRIVILEGE -> PrivilegeSettingsSubPage(
                 settings = settings,
                 privStatus = privStatus,
+                bottomPadding = bottomPadding,
+                onBack = { activePage = SettingsSubPage.ROOT }
+            )
+            SettingsSubPage.SECURITY -> SecurityVerificationSubPage(
+                settings = settings,
+                bottomPadding = bottomPadding,
+                onBack = { activePage = SettingsSubPage.ROOT }
+            )
+            SettingsSubPage.FOLDER_RULES -> FolderRulesSubPage(
+                settings = settings,
                 bottomPadding = bottomPadding,
                 onBack = { activePage = SettingsSubPage.ROOT }
             )
@@ -707,7 +737,7 @@ private fun SettingsRootPage(
     ) {
         item {
             Text(
-                text = "Settings",
+                text = stringResource(R.string.tab_settings),
                 style = MaterialTheme.typography.headlineLarge,
                 fontWeight = FontWeight.Black,
                 letterSpacing = (-0.5).sp
@@ -739,6 +769,28 @@ private fun SettingsRootPage(
                             subtitle = privStatus.activeBackendLabel,
                             onClick = { onNavigate(SettingsSubPage.PRIVILEGE) }
                         )
+                    },
+                    {
+                        NavigationSettingsRow(
+                            icon = Icons.Rounded.VerifiedUser,
+                            shape = MaterialShapes.Cookie9Sided,
+                            iconContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                            iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            title = stringResource(R.string.label_supply_chain),
+                            subtitle = "Reproducible Builds, GitHub Attestations, VirusTotal v3",
+                            onClick = { onNavigate(SettingsSubPage.SECURITY) }
+                        )
+                    },
+                    {
+                        NavigationSettingsRow(
+                            icon = Icons.Rounded.Folder,
+                            shape = MaterialShapes.Clover4Leaf,
+                            iconContainerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                            iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
+                            title = stringResource(R.string.label_folder_rules),
+                            subtitle = "${settings.folderRules.size} automatic regex assignment rule(s)",
+                            onClick = { onNavigate(SettingsSubPage.FOLDER_RULES) }
+                        )
                     }
                 )
             )
@@ -760,13 +812,18 @@ private fun SettingsRootPage(
                         )
                     },
                     {
+                        val secretStatus by AppRepository.secretStatus.collectAsState()
                         NavigationSettingsRow(
                             icon = Icons.Rounded.Key,
                             shape = MaterialShapes.Gem,
                             iconContainerColor = MaterialTheme.colorScheme.secondaryContainer,
                             iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
                             title = "GitHub & Network",
-                            subtitle = if (settings.githubPersonalAccessToken.isNotBlank()) "Token configured" else "Personal token & download mirror",
+                            subtitle = if (secretStatus.hasGitHubToken) {
+                                "${secretStatus.githubTokenCount} encrypted token(s) configured"
+                            } else {
+                                "Encrypted PAT & custom HTTPS mirror"
+                            },
                             onClick = { onNavigate(SettingsSubPage.GITHUB_NETWORK) }
                         )
                     }
@@ -987,6 +1044,7 @@ private fun AppearanceSettingsSubPage(
     }
 }
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun PrivilegeSettingsSubPage(
     settings: ObtainmondSettings,
@@ -994,6 +1052,11 @@ private fun PrivilegeSettingsSubPage(
     bottomPadding: Dp,
     onBack: () -> Unit
 ) {
+    val context = LocalContext.current
+    var externalPkgInput by rememberSaveable(settings.externalInstallerPackage) {
+        mutableStateOf(settings.externalInstallerPackage)
+    }
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -1009,13 +1072,24 @@ private fun PrivilegeSettingsSubPage(
                 color = MaterialTheme.colorScheme.secondaryContainer,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text(
-                    text = "Active: ${privStatus.activeBackendLabel}",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer,
-                    modifier = Modifier.padding(16.dp)
-                )
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "Active: ${privStatus.activeBackendLabel}",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (privStatus.dhizukuAvailable && !privStatus.dhizukuGranted) {
+                        TextButton(onClick = { PrivilegeManager.requestDhizukuPermission(context) }) {
+                            Text("Grant Dhizuku")
+                        }
+                    }
+                }
             }
         }
 
@@ -1039,6 +1113,282 @@ private fun PrivilegeSettingsSubPage(
                     Column {
                         Text(mode.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                         Text(mode.subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+        }
+
+        if (settings.privilegeMode == PrivilegeBackendMode.EXTERNAL) {
+            item {
+                Surface(
+                    shape = RoundedCornerShape(22.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text("External Installer Target Package", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                        OutlinedTextField(
+                            value = externalPkgInput,
+                            onValueChange = {
+                                externalPkgInput = it
+                                AppRepository.updateSettings { s -> s.copy(externalInstallerPackage = it.trim()) }
+                            },
+                            placeholder = { Text("com.rosan.installer.x (blank = system chooser)") },
+                            supportingText = {
+                                Text("Passes APK/APKS/XAPK/APKM via FileProvider directly to InstallerX, App Manager, or chooser.")
+                            },
+                            singleLine = true,
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalLayoutApi::class)
+@Composable
+private fun SecurityVerificationSubPage(
+    settings: ObtainmondSettings,
+    bottomPadding: Dp,
+    onBack: () -> Unit
+) {
+    var vtKeyInput by remember { mutableStateOf(AppRepository.getVirusTotalApiKey()) }
+    var revealKey by remember { mutableStateOf(false) }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .statusBarsPadding(),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = bottomPadding + 104.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        item { SubPageHeader(stringResource(R.string.label_supply_chain), onBack) }
+
+        item {
+            VerificationPolicySelectorCard(
+                title = stringResource(R.string.label_reproducible_builds),
+                subtitle = "Queries F-Droid verification.f-droid.org & IzzyOnDroid RBTLog by APK SHA-256",
+                selected = settings.reproducibleBuildsPolicy,
+                onSelect = { pol -> AppRepository.updateSettings { it.copy(reproducibleBuildsPolicy = pol) } }
+            )
+        }
+
+        item {
+            VerificationPolicySelectorCard(
+                title = stringResource(R.string.label_github_attestation),
+                subtitle = "Verifies Sigstore/SLSA artifact provenance via GitHub REST Attestations API",
+                selected = settings.githubAttestationPolicy,
+                onSelect = { pol -> AppRepository.updateSettings { it.copy(githubAttestationPolicy = pol) } }
+            )
+        }
+
+        item {
+            VerificationPolicySelectorCard(
+                title = stringResource(R.string.label_virustotal_check),
+                subtitle = "Checks APK SHA-256 against VirusTotal v3 (always blocks if engines report malicious)",
+                selected = settings.virusTotalPolicy,
+                onSelect = { pol -> AppRepository.updateSettings { it.copy(virusTotalPolicy = pol) } }
+            )
+        }
+
+        item {
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("VirusTotal v3 API Key", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text(
+                        "Stored encrypted with Tink / Android Keystore.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    OutlinedTextField(
+                        value = vtKeyInput,
+                        onValueChange = {
+                            vtKeyInput = it
+                            AppRepository.updateVirusTotalApiKey(it)
+                        },
+                        placeholder = { Text("Enter VirusTotal x-apikey...") },
+                        visualTransformation = if (revealKey) VisualTransformation.None else PasswordVisualTransformation(),
+                        trailingIcon = {
+                            IconButton(onClick = { revealKey = !revealKey }) {
+                                Icon(
+                                    imageVector = if (revealKey) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
+                                    contentDescription = if (revealKey) "Hide key" else "Show key"
+                                )
+                            }
+                        },
+                        singleLine = true,
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun VerificationPolicySelectorCard(
+    title: String,
+    subtitle: String,
+    selected: VerificationPolicy,
+    onSelect: (VerificationPolicy) -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column {
+                Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                VerificationPolicy.entries.forEach { policy ->
+                    FilledTonalToggleButton(
+                        checked = selected == policy,
+                        onCheckedChange = { onSelect(policy) }
+                    ) {
+                        Text(policy.title)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FolderRulesSubPage(
+    settings: ObtainmondSettings,
+    bottomPadding: Dp,
+    onBack: () -> Unit
+) {
+    var folderInput by remember { mutableStateOf("") }
+    var sourcesInput by remember { mutableStateOf("") }
+    var keywordsInput by remember { mutableStateOf("") }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .statusBarsPadding(),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = bottomPadding + 104.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        item { SubPageHeader(stringResource(R.string.label_folder_rules), onBack) }
+
+        item {
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Add Auto-Folder Rule", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                    OutlinedTextField(
+                        value = folderInput,
+                        onValueChange = { folderInput = it },
+                        label = { Text("Folder Name") },
+                        placeholder = { Text("F-Droid Apps") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = sourcesInput,
+                        onValueChange = { sourcesInput = it },
+                        label = { Text("Source Types (comma-separated, optional)") },
+                        placeholder = { Text("FDROID, IZZYONDROID") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = keywordsInput,
+                        onValueChange = { keywordsInput = it },
+                        label = { Text("Keywords / Regex (comma-separated, optional)") },
+                        placeholder = { Text("f-droid.org, privacy") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    val parsedSources = sourcesInput.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                    val parsedKeywords = keywordsInput.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                    val hasCriteria = parsedSources.isNotEmpty() || parsedKeywords.isNotEmpty()
+                    ExpressiveButton(
+                        onClick = {
+                            val folder = folderInput.trim()
+                            if (folder.isNotEmpty() && hasCriteria) {
+                                val nextRule = FolderRule(
+                                    id = "rule_${System.currentTimeMillis()}",
+                                    folderName = folder,
+                                    sourceTypes = parsedSources,
+                                    keywords = parsedKeywords
+                                )
+                                AppRepository.updateSettings { s ->
+                                    s.copy(folderRules = s.folderRules + nextRule)
+                                }
+                                folderInput = ""
+                                sourcesInput = ""
+                                keywordsInput = ""
+                            }
+                        },
+                        enabled = folderInput.isNotBlank() && hasCriteria,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Add Folder Rule")
+                    }
+                }
+            }
+        }
+
+        items(settings.folderRules) { rule ->
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Rounded.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(rule.folderName, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                        val descParts = buildList {
+                            if (rule.sourceTypes.isNotEmpty()) add("Sources: ${rule.sourceTypes.joinToString(", ")}")
+                            if (rule.keywords.isNotEmpty()) add("Match: ${rule.keywords.joinToString(", ")}")
+                        }.joinToString(" • ")
+                        Text(
+                            text = descParts.ifBlank { "Custom rule" },
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = FontFamily.Monospace,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    IconButton(
+                        onClick = {
+                            AppRepository.updateSettings { s ->
+                                s.copy(folderRules = s.folderRules.filterNot { it == rule })
+                            }
+                        }
+                    ) {
+                        Icon(Icons.Rounded.DeleteOutline, contentDescription = "Remove rule")
                     }
                 }
             }
@@ -1227,9 +1577,18 @@ private fun GitHubNetworkSubPage(
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
-    var githubTokenInput by rememberSaveable(settings.githubPersonalAccessToken) {
-        mutableStateOf(settings.githubPersonalAccessToken)
+    var githubTokenInput by remember {
+        mutableStateOf(AppRepository.getGitHubTokenInput())
     }
+    var gitlabTokenInput by remember {
+        mutableStateOf(AppRepository.getGitLabToken())
+    }
+    var revealTokens by remember { mutableStateOf(false) }
+    var githubMirrorInput by rememberSaveable(settings.githubMirrorUrl) {
+        mutableStateOf(settings.githubMirrorUrl)
+    }
+    val mirrorUrlValid = githubMirrorInput.isBlank() ||
+        githubMirrorInput.trim().startsWith("https://", ignoreCase = true)
     var cacheBytes by remember { mutableStateOf(AppRepository.getApkCacheSizeBytes()) }
 
     LazyColumn(
@@ -1248,14 +1607,41 @@ private fun GitHubNetworkSubPage(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("GitHub Personal Access Token", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text("GitHub Personal Access Tokens", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text(
+                        "Stored encrypted with Android Keystore / Tink. Enter one token per line to rotate on rate limits.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                     OutlinedTextField(
                         value = githubTokenInput,
                         onValueChange = {
                             githubTokenInput = it
-                            AppRepository.updateSettings { s -> s.copy(githubPersonalAccessToken = it.trim()) }
+                            AppRepository.updateGitHubTokenInput(it)
                         },
                         placeholder = { Text("ghp_... (raises rate limit to 5,000 req/hr)") },
+                        visualTransformation = if (revealTokens) VisualTransformation.None else PasswordVisualTransformation(),
+                        trailingIcon = {
+                            IconButton(onClick = { revealTokens = !revealTokens }) {
+                                Icon(
+                                    imageVector = if (revealTokens) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
+                                    contentDescription = if (revealTokens) "Hide tokens" else "Show tokens"
+                                )
+                            }
+                        },
+                        maxLines = 4,
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Text("GitLab Personal Access Token (Optional)", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                    OutlinedTextField(
+                        value = gitlabTokenInput,
+                        onValueChange = {
+                            gitlabTokenInput = it
+                            AppRepository.updateGitLabToken(it)
+                        },
+                        placeholder = { Text("glpat-... (self-hosted or private GitLab releases)") },
+                        visualTransformation = if (revealTokens) VisualTransformation.None else PasswordVisualTransformation(),
                         singleLine = true,
                         shape = RoundedCornerShape(16.dp),
                         modifier = Modifier.fillMaxWidth()
@@ -1272,7 +1658,7 @@ private fun GitHubNetworkSubPage(
                         SwitchSettingsRow(
                             icon = Icons.Rounded.Bolt,
                             title = "GitHub Mirror Acceleration",
-                            subtitle = "Routes release APK downloads via mirror when throttled",
+                            subtitle = "Routes release APK downloads via custom HTTPS mirror (signature verified)",
                             checked = settings.labGitHubMirrorAcceleration,
                             shape = MaterialShapes.Gem,
                             onCheckedChange = { enabled ->
@@ -1282,6 +1668,44 @@ private fun GitHubNetworkSubPage(
                     }
                 )
             )
+        }
+
+        if (settings.labGitHubMirrorAcceleration) {
+            item {
+                Surface(
+                    shape = RoundedCornerShape(24.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Custom Mirror Base URL", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        OutlinedTextField(
+                            value = githubMirrorInput,
+                            onValueChange = {
+                                githubMirrorInput = it
+                                val trimmed = it.trim()
+                                if (trimmed.isEmpty() || trimmed.startsWith("https://", ignoreCase = true)) {
+                                    AppRepository.updateSettings { s -> s.copy(githubMirrorUrl = trimmed) }
+                                }
+                            },
+                            placeholder = { Text("https://mirror.example.com/") },
+                            isError = !mirrorUrlValid,
+                            supportingText = {
+                                Text(
+                                    if (!mirrorUrlValid) {
+                                        "Mirror URL must use https://"
+                                    } else {
+                                        "Downloads from mirrors are strictly blocked if APK signature verification fails."
+                                    }
+                                )
+                            },
+                            singleLine = true,
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+            }
         }
 
         item {

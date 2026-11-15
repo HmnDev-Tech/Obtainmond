@@ -12,11 +12,17 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -35,13 +41,21 @@ import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Science
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Widgets
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.CircularWavyProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.FloatingToolbarDefaults
 import androidx.compose.material3.HorizontalFloatingToolbar
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -55,7 +69,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import io.obtainmond.R
 import io.obtainmond.data.repo.AppRepository
 import io.obtainmond.privilege.PrivilegeManager
 import io.obtainmond.ui.compose.ExpressiveFloatingNavigationBar
@@ -87,23 +104,23 @@ fun ObtainmondRootApp(sharedUrlFromIntent: String? = null) {
     val updateBadgeCount = apps.count { it.hasUpdate }
     val destinations = listOf(
         ExpressiveNavDestination(
-            label = "Apps",
+            label = stringResource(R.string.tab_apps),
             selectedIcon = Icons.Rounded.Widgets,
             unselectedIcon = Icons.Outlined.Widgets,
             badgeCount = updateBadgeCount
         ),
         ExpressiveNavDestination(
-            label = "Add",
+            label = stringResource(R.string.tab_add),
             selectedIcon = Icons.Rounded.AddCircle,
             unselectedIcon = Icons.Outlined.AddCircleOutline
         ),
         ExpressiveNavDestination(
-            label = "Labs",
+            label = stringResource(R.string.tab_labs),
             selectedIcon = Icons.Rounded.Science,
             unselectedIcon = Icons.Outlined.Science
         ),
         ExpressiveNavDestination(
-            label = "Settings",
+            label = stringResource(R.string.tab_settings),
             selectedIcon = Icons.Rounded.Settings,
             unselectedIcon = Icons.Outlined.Settings
         )
@@ -163,191 +180,311 @@ fun ObtainmondRootApp(sharedUrlFromIntent: String? = null) {
     ) {
         val openedApp = apps.firstOrNull { it.id == openedAppId }
 
-        AnimatedContent(
-            targetState = openedApp,
-            transitionSpec = {
-                (scaleIn(
-                    initialScale = 0.94f,
-                    animationSpec = spring(
-                        dampingRatio = Spring.DampingRatioLowBouncy,
-                        stiffness = Spring.StiffnessMediumLow
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            val useRail = maxWidth >= 600.dp
+            val useTwoPane = maxWidth >= 840.dp
+
+            AnimatedContent(
+                targetState = if (!useTwoPane) openedApp else null,
+                transitionSpec = {
+                    (scaleIn(
+                        initialScale = 0.94f,
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioLowBouncy,
+                            stiffness = Spring.StiffnessMediumLow
+                        )
+                    ) + fadeIn()) togetherWith (scaleOut(targetScale = 0.96f) + fadeOut())
+                },
+                label = "rootDetailTransition"
+            ) { detailApp ->
+                if (detailApp != null && !useTwoPane) {
+                    AppDetailScreen(
+                        app = detailApp,
+                        isBusy = detailApp.id in busyIds,
+                        settings = settings,
+                        onBack = { openedAppId = null }
                     )
-                ) + fadeIn()) togetherWith (scaleOut(targetScale = 0.96f) + fadeOut())
-            },
-            label = "rootDetailTransition"
-        ) { detailApp ->
-            if (detailApp != null) {
-                AppDetailScreen(
-                    app = detailApp,
-                    isBusy = detailApp.id in busyIds,
-                    settings = settings,
-                    onBack = { openedAppId = null }
-                )
-            } else {
-                Scaffold(
-                    containerColor = MaterialTheme.colorScheme.background,
-                    bottomBar = {
-                        AnimatedContent(
-                            targetState = selectedAppIds.isNotEmpty() && pagerState.currentPage == 0,
-                            transitionSpec = {
-                                (scaleIn(
-                                    initialScale = 0.9f,
-                                    animationSpec = spring(
-                                        dampingRatio = Spring.DampingRatioMediumBouncy,
-                                        stiffness = Spring.StiffnessMediumLow
-                                    )
-                                ) + fadeIn()) togetherWith (scaleOut(targetScale = 0.92f) + fadeOut())
-                            },
-                            label = "bottomBarMode"
-                        ) { selectionMode ->
-                            if (selectionMode) {
-                                MultiSelectFloatingToolbar(
-                                    onUpdateSelected = {
-                                        val targets = selectedAppIds
-                                        selectedAppIds = emptySet()
-                                        scope.launch {
-                                            val updated = AppRepository.batchUpdateApps(targets)
-                                            Toast.makeText(
-                                                context,
-                                                "Updated $updated selected app(s)",
-                                                Toast.LENGTH_SHORT
-                                            ).show()
+                } else {
+                    Row(modifier = Modifier.fillMaxSize()) {
+                        if (useRail) {
+                            NavigationRail(
+                                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                                header = {
+                                    if (pagerState.currentPage == 0) {
+                                        FloatingActionButton(
+                                            onClick = { if (!isRefreshingAll) triggerSyncAll() }
+                                        ) {
+                                            if (isRefreshingAll) {
+                                                CircularWavyProgressIndicator(modifier = Modifier.size(22.dp))
+                                            } else {
+                                                Icon(Icons.Rounded.Refresh, contentDescription = "Sync all apps")
+                                            }
                                         }
-                                    },
-                                    onTogglePinSelected = {
-                                        val targets = selectedAppIds
-                                        targets.forEach { id ->
-                                            AppRepository.updateApp(id) { it.copy(pinned = !it.pinned) }
-                                        }
-                                        selectedAppIds = emptySet()
-                                    },
-                                    onToggleFreezeSelected = {
-                                        val targets = selectedAppIds
-                                        selectedAppIds = emptySet()
-                                        scope.launch {
-                                            targets.forEach { AppRepository.toggleFreezeApp(it) }
-                                        }
-                                    },
-                                    onDeleteSelected = {
-                                        val targets = selectedAppIds
-                                        AppRepository.removeApps(targets)
-                                        selectedAppIds = emptySet()
-                                        Toast.makeText(
-                                            context,
-                                            "Removed ${targets.size} app(s)",
-                                            Toast.LENGTH_SHORT
-                                        ).show()
-                                    },
-                                    onClear = { selectedAppIds = emptySet() }
-                                )
-                            } else {
-                                ExpressiveFloatingNavigationBar(
-                                    destinations = destinations,
-                                    selectedIndex = pagerState.targetPage,
-                                    onSelect = { page ->
-                                        scope.launch {
-                                            pagerState.animateScrollToPage(
-                                                page = page,
-                                                animationSpec = spring(
-                                                    dampingRatio = Spring.DampingRatioNoBouncy,
-                                                    stiffness = Spring.StiffnessMediumLow
+                                        Spacer(Modifier.height(8.dp))
+                                    }
+                                }
+                            ) {
+                                destinations.forEachIndexed { index, dest ->
+                                    val selected = pagerState.currentPage == index
+                                    NavigationRailItem(
+                                        selected = selected,
+                                        onClick = {
+                                            scope.launch {
+                                                pagerState.animateScrollToPage(
+                                                    page = index,
+                                                    animationSpec = spring(
+                                                        dampingRatio = Spring.DampingRatioNoBouncy,
+                                                        stiffness = Spring.StiffnessMediumLow
+                                                    )
                                                 )
-                                            )
-                                        }
-                                    },
-                                    fabIcon = if (pagerState.targetPage == 0) Icons.Rounded.Refresh else null,
-                                    fabDescription = "Sync all apps",
-                                    fabBusy = isRefreshingAll,
-                                    onFabClick = if (pagerState.targetPage == 0) ({ triggerSyncAll() }) else null
-                                )
+                                            }
+                                        },
+                                        icon = {
+                                            BadgedBox(
+                                                badge = {
+                                                    if (dest.badgeCount > 0) {
+                                                        Badge { Text(dest.badgeCount.toString()) }
+                                                    }
+                                                }
+                                            ) {
+                                                Icon(
+                                                    imageVector = if (selected) dest.selectedIcon else dest.unselectedIcon,
+                                                    contentDescription = dest.label
+                                                )
+                                            }
+                                        },
+                                        label = { Text(dest.label) }
+                                    )
+                                }
                             }
                         }
-                    }
-                ) { innerPadding ->
-                    HorizontalPager(
-                        state = pagerState,
-                        beyondViewportPageCount = 1,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .scrollMotionBlur(
-                                pagerState = pagerState,
-                                enabled = settings.motionBlurEnabled,
-                                intensity = settings.motionBlurIntensity,
-                                strength = settings.motionBlurStrength
-                            )
-                    ) { page ->
-                        val pageOffset = (
-                            (pagerState.currentPage - page) + pagerState.currentPageOffsetFraction
-                        ).absoluteValue.coerceIn(0f, 1f)
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .graphicsLayer {
-                                    alpha = 1f - pageOffset * 0.22f
-                                    val s = 1f - pageOffset * 0.035f
-                                    scaleX = s
-                                    scaleY = s
+
+                        Scaffold(
+                            containerColor = MaterialTheme.colorScheme.background,
+                            modifier = Modifier.weight(1f),
+                            bottomBar = {
+                                val showBottomSelection = selectedAppIds.isNotEmpty() && pagerState.currentPage == 0
+                                if (!useRail || showBottomSelection) {
+                                    AnimatedContent(
+                                        targetState = showBottomSelection,
+                                        transitionSpec = {
+                                            (scaleIn(
+                                                initialScale = 0.9f,
+                                                animationSpec = spring(
+                                                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                    stiffness = Spring.StiffnessMediumLow
+                                                )
+                                            ) + fadeIn()) togetherWith (scaleOut(targetScale = 0.92f) + fadeOut())
+                                        },
+                                        label = "bottomBarMode"
+                                    ) { selectionMode ->
+                                        if (selectionMode) {
+                                            MultiSelectFloatingToolbar(
+                                                onUpdateSelected = {
+                                                    val targets = selectedAppIds
+                                                    selectedAppIds = emptySet()
+                                                    scope.launch {
+                                                        val updated = AppRepository.batchUpdateApps(targets)
+                                                        Toast.makeText(
+                                                            context,
+                                                            "Updated $updated selected app(s)",
+                                                            Toast.LENGTH_SHORT
+                                                        ).show()
+                                                    }
+                                                },
+                                                onTogglePinSelected = {
+                                                    val targets = selectedAppIds
+                                                    targets.forEach { id ->
+                                                        AppRepository.updateApp(id) { it.copy(pinned = !it.pinned) }
+                                                    }
+                                                    selectedAppIds = emptySet()
+                                                },
+                                                onToggleFreezeSelected = {
+                                                    val targets = selectedAppIds
+                                                    selectedAppIds = emptySet()
+                                                    scope.launch {
+                                                        targets.forEach { AppRepository.toggleFreezeApp(it) }
+                                                    }
+                                                },
+                                                onDeleteSelected = {
+                                                    val targets = selectedAppIds
+                                                    AppRepository.removeApps(targets)
+                                                    selectedAppIds = emptySet()
+                                                    Toast.makeText(
+                                                        context,
+                                                        "Removed ${targets.size} app(s)",
+                                                        Toast.LENGTH_SHORT
+                                                    ).show()
+                                                },
+                                                onClear = { selectedAppIds = emptySet() }
+                                            )
+                                        } else if (!useRail) {
+                                            ExpressiveFloatingNavigationBar(
+                                                destinations = destinations,
+                                                selectedIndex = pagerState.targetPage,
+                                                onSelect = { page ->
+                                                    scope.launch {
+                                                        pagerState.animateScrollToPage(
+                                                            page = page,
+                                                            animationSpec = spring(
+                                                                dampingRatio = Spring.DampingRatioNoBouncy,
+                                                                stiffness = Spring.StiffnessMediumLow
+                                                            )
+                                                        )
+                                                    }
+                                                },
+                                                fabIcon = if (pagerState.targetPage == 0) Icons.Rounded.Refresh else null,
+                                                fabDescription = "Sync all apps",
+                                                fabBusy = isRefreshingAll,
+                                                onFabClick = if (pagerState.targetPage == 0) ({ triggerSyncAll() }) else null
+                                            )
+                                        }
+                                    }
                                 }
-                        ) {
-                            when (page) {
-                                0 -> AppsDashboardScreen(
-                                    apps = apps,
-                                    busyIds = busyIds,
-                                    privStatus = privStatus,
-                                    settings = settings,
-                                    isRefreshingAll = isRefreshingAll,
-                                    selectedAppIds = selectedAppIds,
-                                    bottomPadding = innerPadding.calculateBottomPadding(),
-                                    onOpenAppDetail = { id -> openedAppId = id },
-                                    onToggleSelectApp = { id ->
-                                        selectedAppIds = if (id in selectedAppIds) {
-                                            selectedAppIds - id
-                                        } else {
-                                            selectedAppIds + id
+                            }
+                        ) { innerPadding ->
+                            HorizontalPager(
+                                state = pagerState,
+                                beyondViewportPageCount = 1,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .scrollMotionBlur(
+                                        pagerState = pagerState,
+                                        enabled = settings.motionBlurEnabled,
+                                        intensity = settings.motionBlurIntensity,
+                                        strength = settings.motionBlurStrength
+                                    )
+                            ) { page ->
+                                val pageOffset = (
+                                    (pagerState.currentPage - page) + pagerState.currentPageOffsetFraction
+                                ).absoluteValue.coerceIn(0f, 1f)
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .graphicsLayer {
+                                            alpha = 1f - pageOffset * 0.22f
+                                            val s = 1f - pageOffset * 0.035f
+                                            scaleX = s
+                                            scaleY = s
                                         }
-                                    },
-                                    onSelectAll = { ids -> selectedAppIds = ids.toSet() },
-                                    onClearSelection = { selectedAppIds = emptySet() },
-                                    onRefreshAll = { triggerSyncAll() },
-                                    onJumpToAdd = {
-                                        scope.launch {
-                                            pagerState.animateScrollToPage(
-                                                page = 1,
-                                                animationSpec = spring(
-                                                    dampingRatio = Spring.DampingRatioNoBouncy,
-                                                    stiffness = Spring.StiffnessMediumLow
+                                ) {
+                                    when (page) {
+                                        0 -> {
+                                            if (useTwoPane) {
+                                                Row(modifier = Modifier.fillMaxSize()) {
+                                                    Box(modifier = Modifier.weight(0.46f).fillMaxHeight()) {
+                                                        AppsDashboardScreen(
+                                                            apps = apps,
+                                                            busyIds = busyIds,
+                                                            privStatus = privStatus,
+                                                            settings = settings,
+                                                            isRefreshingAll = isRefreshingAll,
+                                                            selectedAppIds = selectedAppIds,
+                                                            bottomPadding = innerPadding.calculateBottomPadding(),
+                                                            onOpenAppDetail = { id -> openedAppId = id },
+                                                            onToggleSelectApp = { id ->
+                                                                selectedAppIds = if (id in selectedAppIds) {
+                                                                    selectedAppIds - id
+                                                                } else {
+                                                                    selectedAppIds + id
+                                                                }
+                                                            },
+                                                            onSelectAll = { ids -> selectedAppIds = ids.toSet() },
+                                                            onClearSelection = { selectedAppIds = emptySet() },
+                                                            onRefreshAll = { triggerSyncAll() },
+                                                            onJumpToAdd = {
+                                                                scope.launch {
+                                                                    pagerState.animateScrollToPage(page = 1)
+                                                                }
+                                                            }
+                                                        )
+                                                    }
+                                                    VerticalDivider()
+                                                    Box(
+                                                        modifier = Modifier.weight(0.54f).fillMaxHeight(),
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        if (openedApp != null) {
+                                                            AppDetailScreen(
+                                                                app = openedApp,
+                                                                isBusy = openedApp.id in busyIds,
+                                                                settings = settings,
+                                                                onBack = { openedAppId = null }
+                                                            )
+                                                        } else {
+                                                            Text(
+                                                                text = stringResource(R.string.msg_select_app_detail),
+                                                                style = MaterialTheme.typography.bodyMedium,
+                                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                                textAlign = TextAlign.Center,
+                                                                modifier = Modifier.padding(24.dp)
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            } else {
+                                                AppsDashboardScreen(
+                                                    apps = apps,
+                                                    busyIds = busyIds,
+                                                    privStatus = privStatus,
+                                                    settings = settings,
+                                                    isRefreshingAll = isRefreshingAll,
+                                                    selectedAppIds = selectedAppIds,
+                                                    bottomPadding = innerPadding.calculateBottomPadding(),
+                                                    onOpenAppDetail = { id -> openedAppId = id },
+                                                    onToggleSelectApp = { id ->
+                                                        selectedAppIds = if (id in selectedAppIds) {
+                                                            selectedAppIds - id
+                                                        } else {
+                                                            selectedAppIds + id
+                                                        }
+                                                    },
+                                                    onSelectAll = { ids -> selectedAppIds = ids.toSet() },
+                                                    onClearSelection = { selectedAppIds = emptySet() },
+                                                    onRefreshAll = { triggerSyncAll() },
+                                                    onJumpToAdd = {
+                                                        scope.launch {
+                                                            pagerState.animateScrollToPage(
+                                                                page = 1,
+                                                                animationSpec = spring(
+                                                                    dampingRatio = Spring.DampingRatioNoBouncy,
+                                                                    stiffness = Spring.StiffnessMediumLow
+                                                                )
+                                                            )
+                                                        }
+                                                    }
                                                 )
-                                            )
+                                            }
                                         }
+                                        1 -> AddAppScreen(
+                                            initialSharedUrl = sharedUrlFromIntent.orEmpty(),
+                                            settings = settings,
+                                            bottomPadding = innerPadding.calculateBottomPadding(),
+                                            onAdded = {
+                                                scope.launch {
+                                                    pagerState.animateScrollToPage(
+                                                        page = 0,
+                                                        animationSpec = spring(
+                                                            dampingRatio = Spring.DampingRatioNoBouncy,
+                                                            stiffness = Spring.StiffnessMediumLow
+                                                        )
+                                                    )
+                                                }
+                                            }
+                                        )
+                                        2 -> ObtainedLabsScreen(
+                                            apps = apps,
+                                            privStatus = privStatus,
+                                            settings = settings,
+                                            bottomPadding = innerPadding.calculateBottomPadding()
+                                        )
+                                        3 -> SettingsScreen(
+                                            settings = settings,
+                                            privStatus = privStatus,
+                                            bottomPadding = innerPadding.calculateBottomPadding()
+                                        )
                                     }
-                                )
-                                1 -> AddAppScreen(
-                                    initialSharedUrl = sharedUrlFromIntent.orEmpty(),
-                                    settings = settings,
-                                    bottomPadding = innerPadding.calculateBottomPadding(),
-                                    onAdded = {
-                                        scope.launch {
-                                            pagerState.animateScrollToPage(
-                                                page = 0,
-                                                animationSpec = spring(
-                                                    dampingRatio = Spring.DampingRatioNoBouncy,
-                                                    stiffness = Spring.StiffnessMediumLow
-                                                )
-                                            )
-                                        }
-                                    }
-                                )
-                                2 -> ObtainedLabsScreen(
-                                    apps = apps,
-                                    privStatus = privStatus,
-                                    settings = settings,
-                                    bottomPadding = innerPadding.calculateBottomPadding()
-                                )
-                                3 -> SettingsScreen(
-                                    settings = settings,
-                                    privStatus = privStatus,
-                                    bottomPadding = innerPadding.calculateBottomPadding()
-                                )
+                                }
                             }
                         }
                     }

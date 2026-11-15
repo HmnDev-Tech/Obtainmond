@@ -35,6 +35,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
@@ -49,14 +50,18 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.FilterList
+import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.FolderCopy
 import androidx.compose.material.icons.rounded.PushPin
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.SelectAll
+import androidx.compose.material.icons.rounded.Upload
 import androidx.compose.material.icons.rounded.VerifiedUser
+import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilterChip
@@ -76,7 +81,9 @@ import androidx.compose.material3.FilledTonalToggleButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -89,15 +96,19 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.obtainmond.R
 import io.obtainmond.data.model.ObtainmondSettings
 import io.obtainmond.data.model.TrackedApp
 import io.obtainmond.data.repo.AppRepository
+import io.obtainmond.data.repo.BulkImportCandidate
+import io.obtainmond.data.repo.DiscoveredDeviceApp
 import io.obtainmond.privilege.PrivilegeManager
 import io.obtainmond.privilege.PrivilegeStatus
 import io.obtainmond.ui.compose.ExpressiveAppAvatar
@@ -134,7 +145,9 @@ fun AppsDashboardScreen(
     var statusFilter by rememberSaveable { mutableStateOf("All") }
     var sourceFilter by rememberSaveable { mutableStateOf("All") }
     var categoryFilter by rememberSaveable { mutableStateOf("All") }
+    var folderFilter by rememberSaveable { mutableStateOf("All") }
     var showFilterSheet by remember { mutableStateOf(false) }
+    var showBulkImportSheet by remember { mutableStateOf(false) }
     var showPrivilegeSheet by remember { mutableStateOf(false) }
     var collapsedCategories by remember { mutableStateOf<Set<String>>(emptySet()) }
 
@@ -144,6 +157,9 @@ fun AppsDashboardScreen(
     val availableCategories = remember(apps) {
         listOf("All") + apps.flatMap { it.categories }.distinct().sorted()
     }
+    val availableFolders = remember(apps) {
+        listOf("All") + apps.flatMap { it.folders }.distinct().sorted()
+    }
 
     val filteredAndSorted = remember(
         apps,
@@ -151,6 +167,7 @@ fun AppsDashboardScreen(
         statusFilter,
         sourceFilter,
         categoryFilter,
+        folderFilter,
         settings.appSortMode
     ) {
         val base = apps.filter { app ->
@@ -161,6 +178,7 @@ fun AppsDashboardScreen(
                 app.author.contains(q, ignoreCase = true)
             val matchesStatus = when (statusFilter) {
                 "Updates" -> app.hasUpdate
+                "Needs attention" -> app.needsAttention
                 "Installed" -> app.installedVersion.isNotBlank()
                 "Not Installed" -> app.installedVersion.isBlank()
                 "Frozen" -> app.isFrozen
@@ -168,11 +186,13 @@ fun AppsDashboardScreen(
             }
             val matchesSource = sourceFilter == "All" || app.sourceType == sourceFilter
             val matchesCategory = categoryFilter == "All" || categoryFilter in app.categories
-            matchesQuery && matchesStatus && matchesSource && matchesCategory
+            val matchesFolder = folderFilter == "All" || folderFilter in app.folders
+            matchesQuery && matchesStatus && matchesSource && matchesCategory && matchesFolder
         }
 
         val comparator = when (settings.appSortMode) {
             1 -> compareByDescending<TrackedApp> { it.pinned }
+                .thenByDescending { it.needsAttention }
                 .thenByDescending { it.hasUpdate }
                 .thenBy { it.name.lowercase() }
             2 -> compareByDescending<TrackedApp> { it.pinned }
@@ -192,16 +212,22 @@ fun AppsDashboardScreen(
             emptyMap()
         } else {
             filteredAndSorted
-                .groupBy { it.categories.firstOrNull()?.ifBlank { null } ?: "Uncategorized" }
+                .groupBy { app ->
+                    app.folders.firstOrNull()?.ifBlank { null }
+                        ?: app.categories.firstOrNull()?.ifBlank { null }
+                        ?: "Uncategorized"
+                }
                 .toSortedMap(compareBy<String> { it == "Uncategorized" }.thenBy { it.lowercase() })
         }
     }
 
     val updatesReadyCount = remember(apps) { apps.count { it.hasUpdate } }
+    val needsAttentionCount = remember(apps) { apps.count { it.needsAttention } }
     val activeFilterCount = listOf(
         statusFilter != "All",
         sourceFilter != "All",
-        categoryFilter != "All"
+        categoryFilter != "All",
+        folderFilter != "All"
     ).count { it }
 
     val outlineFallback = MaterialTheme.colorScheme.outline
@@ -263,7 +289,7 @@ fun AppsDashboardScreen(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Apps",
+                            text = stringResource(R.string.tab_apps),
                             style = MaterialTheme.typography.headlineLarge,
                             fontWeight = FontWeight.Black,
                             letterSpacing = (-0.5).sp
@@ -306,6 +332,16 @@ fun AppsDashboardScreen(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        ExpressiveTonalButton(
+                            onClick = { showBulkImportSheet = true },
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Upload,
+                                contentDescription = stringResource(R.string.action_bulk_import),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                         FilledTonalToggleButton(
                             checked = settings.groupByCategory,
                             onCheckedChange = { enabled ->
@@ -314,7 +350,7 @@ fun AppsDashboardScreen(
                         ) {
                             Icon(
                                 imageVector = Icons.Rounded.FolderCopy,
-                                contentDescription = "Group by category",
+                                contentDescription = "Group by folder or category",
                                 modifier = Modifier.size(18.dp)
                             )
                         }
@@ -435,44 +471,84 @@ fun AppsDashboardScreen(
             }
         }
 
-        if (availableCategories.size > 2) {
-            item {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.horizontalScroll(rememberScrollState())
-                ) {
-                    listOf("All", "Updates").forEach { quickStatus ->
-                        val count = if (quickStatus == "All") apps.size else updatesReadyCount
-                        FilterChip(
-                            selected = statusFilter == quickStatus && categoryFilter == "All",
-                            onClick = {
-                                statusFilter = quickStatus
-                                categoryFilter = "All"
-                            },
-                            shape = CircleShape,
-                            label = { Text("$quickStatus ($count)") }
-                        )
-                    }
-                    availableCategories.drop(1).forEach { cat ->
-                        val catColor = categoryAccentColor(cat, MaterialTheme.colorScheme.primary)
-                        FilterChip(
-                            selected = categoryFilter == cat,
-                            onClick = {
-                                categoryFilter = if (categoryFilter == cat) "All" else cat
-                                statusFilter = "All"
-                            },
-                            leadingIcon = {
-                                Box(
-                                    modifier = Modifier
-                                        .size(10.dp)
-                                        .clip(MaterialShapes.Cookie4Sided.toShape())
-                                        .background(catColor)
-                                )
-                            },
-                            shape = CircleShape,
-                            label = { Text(cat) }
-                        )
-                    }
+        item {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.horizontalScroll(rememberScrollState())
+            ) {
+                listOf("All", "Updates").forEach { quickStatus ->
+                    val count = if (quickStatus == "All") apps.size else updatesReadyCount
+                    val label = if (quickStatus == "All") stringResource(R.string.filter_all) else stringResource(R.string.filter_updates)
+                    FilterChip(
+                        selected = statusFilter == quickStatus && categoryFilter == "All" && folderFilter == "All",
+                        onClick = {
+                            statusFilter = quickStatus
+                            categoryFilter = "All"
+                            folderFilter = "All"
+                        },
+                        shape = CircleShape,
+                        label = { Text("$label ($count)") }
+                    )
+                }
+                if (needsAttentionCount > 0 || statusFilter == "Needs attention") {
+                    FilterChip(
+                        selected = statusFilter == "Needs attention",
+                        onClick = {
+                            statusFilter = if (statusFilter == "Needs attention") "All" else "Needs attention"
+                            categoryFilter = "All"
+                            folderFilter = "All"
+                        },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Rounded.WarningAmber,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        },
+                        shape = CircleShape,
+                        label = { Text("${stringResource(R.string.filter_attention)} ($needsAttentionCount)") }
+                    )
+                }
+                availableFolders.drop(1).forEach { folder ->
+                    FilterChip(
+                        selected = folderFilter == folder,
+                        onClick = {
+                            folderFilter = if (folderFilter == folder) "All" else folder
+                            statusFilter = "All"
+                            categoryFilter = "All"
+                        },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Rounded.Folder,
+                                contentDescription = null,
+                                modifier = Modifier.size(15.dp)
+                            )
+                        },
+                        shape = CircleShape,
+                        label = { Text(folder) }
+                    )
+                }
+                availableCategories.drop(1).forEach { cat ->
+                    val catColor = categoryAccentColor(cat, MaterialTheme.colorScheme.primary)
+                    FilterChip(
+                        selected = categoryFilter == cat,
+                        onClick = {
+                            categoryFilter = if (categoryFilter == cat) "All" else cat
+                            statusFilter = "All"
+                            folderFilter = "All"
+                        },
+                        leadingIcon = {
+                            Box(
+                                modifier = Modifier
+                                    .size(10.dp)
+                                    .clip(MaterialShapes.Cookie4Sided.toShape())
+                                    .background(catColor)
+                            )
+                        },
+                        shape = CircleShape,
+                        label = { Text(cat) }
+                    )
                 }
             }
         }
@@ -681,13 +757,36 @@ fun AppsDashboardScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        listOf("All", "Updates", "Installed", "Not Installed", "Frozen").forEach { st ->
+                        listOf("All", "Updates", "Needs attention", "Installed", "Not Installed", "Frozen").forEach { st ->
                             FilterChip(
                                 selected = statusFilter == st,
                                 onClick = { statusFilter = st },
                                 shape = CircleShape,
                                 label = { Text(st) }
                             )
+                        }
+                    }
+                }
+
+                if (availableFolders.size > 1) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = "Folders",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            availableFolders.forEach { folder ->
+                                FilterChip(
+                                    selected = folderFilter == folder,
+                                    onClick = { folderFilter = folder },
+                                    shape = CircleShape,
+                                    label = { Text(folder) }
+                                )
+                            }
                         }
                     }
                 }
@@ -721,8 +820,8 @@ fun AppsDashboardScreen(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Column {
-                        Text("Group by Category", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                        Text("Expandable Obtainium category sections", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Group by Folder / Category", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        Text("Expandable folder & category sections", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Switch(
                         checked = settings.groupByCategory,
@@ -730,6 +829,152 @@ fun AppsDashboardScreen(
                             AppRepository.updateSettings { it.copy(groupByCategory = enabled) }
                         }
                     )
+                }
+            }
+        }
+    }
+
+    if (showBulkImportSheet) {
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        var discovered by remember { mutableStateOf<List<DiscoveredDeviceApp>>(emptyList()) }
+        var scanning by remember { mutableStateOf(true) }
+        var importing by remember { mutableStateOf(false) }
+        var bulkSearch by remember { mutableStateOf("") }
+        val checkedMap = remember { mutableStateMapOf<String, Boolean>() }
+        val urlMap = remember { mutableStateMapOf<String, String>() }
+
+        LaunchedEffect(showBulkImportSheet) {
+            scanning = true
+            val list = AppRepository.discoverInstallableDeviceApps()
+            discovered = list
+            list.forEach { item ->
+                urlMap.putIfAbsent(item.packageId, item.suggestedUrl)
+            }
+            scanning = false
+        }
+
+        val visibleDiscovered = remember(discovered, bulkSearch) {
+            val q = bulkSearch.trim()
+            if (q.isBlank()) discovered else discovered.filter {
+                it.appName.contains(q, ignoreCase = true) ||
+                    it.packageId.contains(q, ignoreCase = true)
+            }
+        }
+        val selectedCandidates = discovered.mapNotNull { item ->
+            if (checkedMap[item.packageId] == true) {
+                val url = urlMap[item.packageId].orEmpty().trim()
+                if (url.isNotBlank()) BulkImportCandidate(item.packageId, item.appName, url) else null
+            } else null
+        }
+
+        ModalBottomSheet(
+            onDismissRequest = { if (!importing) showBulkImportSheet = false },
+            sheetState = sheetState
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .padding(bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = stringResource(R.string.action_bulk_import),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.ExtraBold
+                )
+                Text(
+                    text = "Select installed 3rd-party packages and adjust their source URLs before bulk tracking.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedTextField(
+                    value = bulkSearch,
+                    onValueChange = { bulkSearch = it },
+                    placeholder = { Text("Filter installed apps...") },
+                    leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+                    singleLine = true,
+                    shape = CircleShape,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                if (scanning) {
+                    LinearWavyProgressIndicator(modifier = Modifier.fillMaxWidth())
+                } else if (visibleDiscovered.isEmpty()) {
+                    Text(
+                        text = "All installed 3rd-party apps are already tracked or none match.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(340.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(visibleDiscovered, key = { it.packageId }) { item ->
+                            val isChecked = checkedMap[item.packageId] == true
+                            Surface(
+                                shape = RoundedCornerShape(16.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.clickable { checkedMap[item.packageId] = !isChecked }
+                                    ) {
+                                        Checkbox(
+                                            checked = isChecked,
+                                            onCheckedChange = { checkedMap[item.packageId] = it }
+                                        )
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(item.appName, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                                            Text(
+                                                text = "${item.packageId} (${item.versionName.ifBlank { "?" }})",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontFamily = FontFamily.Monospace,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                    if (isChecked) {
+                                        OutlinedTextField(
+                                            value = urlMap[item.packageId] ?: item.suggestedUrl,
+                                            onValueChange = { urlMap[item.packageId] = it },
+                                            label = { Text("Source URL") },
+                                            singleLine = true,
+                                            modifier = Modifier.fillMaxWidth()
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if (importing) {
+                    LinearWavyProgressIndicator(modifier = Modifier.fillMaxWidth())
+                }
+                ExpressiveButton(
+                    onClick = {
+                        importing = true
+                        scope.launch {
+                            val importedCount = AppRepository.bulkImportApps(selectedCandidates)
+                            importing = false
+                            showBulkImportSheet = false
+                            Toast.makeText(
+                                context,
+                                "Imported $importedCount app(s)",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    },
+                    enabled = !importing && selectedCandidates.isNotEmpty(),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Rounded.Upload, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Import ${selectedCandidates.size} Selected App(s)")
                 }
             }
         }
@@ -914,6 +1159,7 @@ private fun ObtainiumAppRow(
     val containerColor by animateColorAsState(
         targetValue = when {
             isSelected -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f)
+            app.needsAttention -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.36f)
             app.hasUpdate -> MaterialTheme.colorScheme.surfaceContainer
             else -> MaterialTheme.colorScheme.surfaceContainerLow
         },
@@ -1007,6 +1253,15 @@ private fun ObtainiumAppRow(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+                if (app.needsAttention) {
+                    Text(
+                        text = "${app.errorCategory.ifBlank { "Attention" }}: ${app.lastError}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
 
             if (!selectionActive) {
@@ -1018,6 +1273,14 @@ private fun ObtainiumAppRow(
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    app.needsAttention -> {
+                        Icon(
+                            imageVector = Icons.Rounded.WarningAmber,
+                            contentDescription = stringResource(R.string.label_needs_attention),
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(22.dp)
                         )
                     }
                     app.trackOnly -> {
