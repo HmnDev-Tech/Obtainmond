@@ -43,6 +43,38 @@ pub struct ApkSelectionResponse {
     pub ranked_candidates: Vec<ScoredCandidate>,
 }
 
+pub fn is_android_package_filename(name_lower: &str) -> bool {
+    if name_lower.ends_with(".apk")
+        || name_lower.ends_with(".apks")
+        || name_lower.ends_with(".xapk")
+        || name_lower.ends_with(".apkm")
+        || name_lower.ends_with(".apk.zip")
+    {
+        return true;
+    }
+    if name_lower.ends_with(".zip") {
+        let excluded = [
+            "source", "src", "checksum", "sha256", "sha512", "symbols", "mapping", "proguard",
+        ];
+        if excluded.iter().any(|bad| name_lower.contains(bad)) {
+            return false;
+        }
+        return name_lower.contains("apk")
+            || name_lower.contains("bundle")
+            || name_lower.contains("split")
+            || name_lower.contains("android");
+    }
+    false
+}
+
+pub fn is_split_bundle_filename(name_lower: &str) -> bool {
+    name_lower.ends_with(".apks")
+        || name_lower.ends_with(".xapk")
+        || name_lower.ends_with(".apkm")
+        || name_lower.ends_with(".apk.zip")
+        || (name_lower.ends_with(".zip") && is_android_package_filename(name_lower))
+}
+
 fn detect_abi_in_filename(name_lower: &str) -> &'static str {
     // Check specific architectures from most specific to least specific
     if name_lower.contains("arm64-v8a")
@@ -61,7 +93,10 @@ fn detect_abi_in_filename(name_lower: &str) -> &'static str {
     {
         return "armeabi-v7a";
     }
-    if name_lower.contains("x86_64") || name_lower.contains("x86-64") || name_lower.contains("amd64") {
+    if name_lower.contains("x86_64")
+        || name_lower.contains("x86-64")
+        || name_lower.contains("amd64")
+    {
         return "x86_64";
     }
     if name_lower.contains("x86") || name_lower.contains("i686") || name_lower.contains("ia32") {
@@ -117,8 +152,8 @@ pub fn select_best_apk(req: &ApkSelectionRequest) -> ApkSelectionResponse {
     for cand in &req.candidates {
         let name_lower = cand.name.to_ascii_lowercase();
 
-        // Must be an actual .apk file (reject .apk.sha256, .apk.asc, .idsig, .apks)
-        if !name_lower.ends_with(".apk") {
+        // Accept single APKs and split bundles (.apks, .xapk, .apkm, bundle .zip); reject signatures/checksums/sources
+        if !is_android_package_filename(&name_lower) {
             continue;
         }
 
@@ -161,7 +196,10 @@ pub fn select_best_apk(req: &ApkSelectionRequest) -> ApkSelectionResponse {
         // 2. Score against device supported ABIs
         if detected_abi == primary_device_abi {
             score += 900;
-            reasons.push(format!("matches device primary ABI ({})", primary_device_abi));
+            reasons.push(format!(
+                "matches device primary ABI ({})",
+                primary_device_abi
+            ));
         } else if let Some(pos) = req
             .device_abis
             .iter()
@@ -169,7 +207,11 @@ pub fn select_best_apk(req: &ApkSelectionRequest) -> ApkSelectionResponse {
         {
             let abi_bonus = (600_i32 - (pos as i32 * 150)).max(200);
             score += abi_bonus;
-            reasons.push(format!("matches device secondary ABI #{} ({})", pos + 1, detected_abi));
+            reasons.push(format!(
+                "matches device secondary ABI #{} ({})",
+                pos + 1,
+                detected_abi
+            ));
         } else if detected_abi == "universal" {
             score += 650;
             reasons.push("universal / multi-arch APK".to_string());
@@ -188,9 +230,12 @@ pub fn select_best_apk(req: &ApkSelectionRequest) -> ApkSelectionResponse {
             }
         }
 
-        // 4. Prefer release/signed builds
+        // 4. Prefer release/signed builds and single APK slightly over split archive when equivalent
         if name_lower.contains("release") || name_lower.contains("signed") {
             score += 80;
+        }
+        if !is_split_bundle_filename(&name_lower) {
+            score += 60;
         }
 
         scored.push(ScoredCandidate {
@@ -237,8 +282,76 @@ pub fn select_best_apk(req: &ApkSelectionRequest) -> ApkSelectionResponse {
             detected_abi: String::new(),
             score: -1,
             confidence: "NONE".to_string(),
-            reason: "No valid .apk asset found in release".to_string(),
+            reason: "No valid Android package asset found in release".to_string(),
             ranked_candidates: Vec::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prefers_installed_abi_over_universal_and_foreign() {
+        let req = ApkSelectionRequest {
+            candidates: vec![
+                ApkCandidateInput {
+                    name: "app-x86_64-release.apk".to_string(),
+                    url: "https://ex.com/x86_64.apk".to_string(),
+                    size: 10,
+                },
+                ApkCandidateInput {
+                    name: "app-universal-release.apk".to_string(),
+                    url: "https://ex.com/univ.apk".to_string(),
+                    size: 10,
+                },
+                ApkCandidateInput {
+                    name: "app-arm64-v8a-release.apk".to_string(),
+                    url: "https://ex.com/arm64.apk".to_string(),
+                    size: 10,
+                },
+            ],
+            device_abis: vec!["arm64-v8a".to_string(), "armeabi-v7a".to_string()],
+            installed_abi: "arm64-v8a".to_string(),
+            previous_apk_name: String::new(),
+            filter_regex: String::new(),
+            exclude_debug: true,
+        };
+        let res = select_best_apk(&req);
+        assert_eq!(res.selected_name, "app-arm64-v8a-release.apk");
+        assert_eq!(res.detected_abi, "arm64-v8a");
+        assert_eq!(res.confidence, "EXACT_INSTALLED_MATCH");
+    }
+
+    #[test]
+    fn accepts_split_bundles_and_rejects_source_zips_and_checksums() {
+        let req = ApkSelectionRequest {
+            candidates: vec![
+                ApkCandidateInput {
+                    name: "app-v1.0-source.zip".to_string(),
+                    url: "https://ex.com/src.zip".to_string(),
+                    size: 10,
+                },
+                ApkCandidateInput {
+                    name: "app-release.apks.sha256".to_string(),
+                    url: "https://ex.com/sum".to_string(),
+                    size: 10,
+                },
+                ApkCandidateInput {
+                    name: "app-arm64-release.xapk".to_string(),
+                    url: "https://ex.com/app.xapk".to_string(),
+                    size: 10,
+                },
+            ],
+            device_abis: vec!["arm64-v8a".to_string()],
+            installed_abi: String::new(),
+            previous_apk_name: String::new(),
+            filter_regex: String::new(),
+            exclude_debug: true,
+        };
+        let res = select_best_apk(&req);
+        assert_eq!(res.selected_name, "app-arm64-release.xapk");
+        assert_eq!(res.ranked_candidates.len(), 1);
     }
 }

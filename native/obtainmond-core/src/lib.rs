@@ -15,9 +15,7 @@ fn jstring_to_rust(env: &mut JNIEnv, input: &JString) -> String {
     if input.is_null() {
         return String::new();
     }
-    env.get_string(input)
-        .map(|s| s.into())
-        .unwrap_or_default()
+    env.get_string(input).map(|s| s.into()).unwrap_or_default()
 }
 
 fn rust_to_jstring<'a>(env: &mut JNIEnv<'a>, output: &str) -> jstring {
@@ -172,7 +170,9 @@ pub extern "system" fn Java_io_obtainmond_rust_ObtainmondNative_inspectApkFileJs
 }
 
 #[no_mangle]
-pub extern "system" fn Java_io_obtainmond_rust_ObtainmondNative_buildSilentInstallCommand<'local>(
+pub extern "system" fn Java_io_obtainmond_rust_ObtainmondNative_buildSilentInstallCommand<
+    'local,
+>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     apk_path: JString<'local>,

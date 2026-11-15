@@ -98,7 +98,11 @@ pub fn normalize_version(raw: &str) -> String {
     let without_paren = trimmed.split('(').next().unwrap_or(trimmed).trim();
 
     // Strip build metadata (+...)
-    let without_build = without_paren.split('+').next().unwrap_or(without_paren).trim();
+    let without_build = without_paren
+        .split('+')
+        .next()
+        .unwrap_or(without_paren)
+        .trim();
 
     // Strip common leading prefixes: v, V, release-, ver-, version-
     let mut s = without_build.to_string();
@@ -314,7 +318,11 @@ pub fn compare_versions(installed: &str, remote: &str) -> Ordering {
     Ordering::Equal
 }
 
-pub fn evaluate_update(installed: &str, remote: &str, allow_downgrade: bool) -> VersionComparisonResult {
+pub fn evaluate_update(
+    installed: &str,
+    remote: &str,
+    allow_downgrade: bool,
+) -> VersionComparisonResult {
     let inst_norm = normalize_version(installed);
     let rem_norm = normalize_version(remote);
     let ord = compare_versions(&inst_norm, &rem_norm);
@@ -337,5 +345,34 @@ pub fn evaluate_update(installed: &str, remote: &str, allow_downgrade: bool) -> 
         is_update_available: is_update,
         is_downgrade: ord == Ordering::Greater,
         ordering: ordering_int,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalizes_prefixes_and_cosmetic_suffixes() {
+        assert_eq!(normalize_version("v2.0.1-release"), "2.0.1");
+        assert_eq!(normalize_version("release-1.15.2-arm64-v8a"), "1.15.2");
+    }
+
+    #[test]
+    fn semantic_and_prerelease_comparisons() {
+        let up = evaluate_update("1.2.3", "1.2.4", false);
+        assert!(up.is_update_available);
+        assert!(!up.is_downgrade);
+
+        let stable_over_beta = evaluate_update("2.0.0-beta1", "2.0.0", false);
+        assert!(stable_over_beta.is_update_available);
+
+        let down_blocked = evaluate_update("2.1.0", "2.0.9", false);
+        assert!(!down_blocked.is_update_available);
+        assert!(down_blocked.is_downgrade);
+
+        let down_allowed = evaluate_update("2.1.0", "2.0.9", true);
+        assert!(down_allowed.is_update_available);
+        assert!(down_allowed.is_downgrade);
     }
 }
