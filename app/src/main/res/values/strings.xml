@@ -17,6 +17,13 @@
     <string name="action_skip_version">Skip v%1$s</string>
     <string name="action_clear_skip">Un-skip v%1$s</string>
     <string name="action_restore">Restore</string>
+    <string name="app_operation_in_progress">An operation for this app is already in progress.</string>
+    <string name="app_changed_during_refresh">The tracked app changed during the release check. Check again.</string>
+    <string name="package_install_failed">Android rejected the installation.</string>
+    <string name="package_signature_invalid">The APK signature is invalid.</string>
+    <string name="package_id_mismatch">Expected package %1$s, but the APK contains %2$s.</string>
+    <string name="dhizuku_session_unavailable">Dhizuku could not start an install session. Check its availability and permissions.</string>
+    <string name="gitlab_token_placeholder">GitLab.com personal access token</string>
     <string name="label_on_demand_only">On-Demand Only</string>
     <string name="desc_on_demand_only">Skip background auto-checks; refresh only on manual demand</string>
     <string name="label_needs_attention">Needs attention</string>
@@ -24,6 +31,7 @@
     <string name="label_supply_chain">Supply-Chain Verification</string>
     <string name="label_reproducible_builds">Reproducible Builds (F-Droid / Izzy)</string>
     <string name="label_github_attestation">GitHub Provenance Attestations</string>
+    <string name="desc_github_attestation">Looks up attestations by APK hash. Cryptographic verification is unavailable, so Enforce blocks GitHub installs.</string>
     <string name="label_virustotal_check">VirusTotal Hash Check</string>
     <string name="label_folder_rules">Auto-Folder Rules</string>
     <string name="label_rollback_vault">Rollback Vault</string>

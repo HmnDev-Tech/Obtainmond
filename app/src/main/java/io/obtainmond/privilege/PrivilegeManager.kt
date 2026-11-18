@@ -17,9 +17,12 @@ import com.hamondev.shevery.api.SheveryApiConstants
 import com.hamondev.shevery.api.SheveryPrivilege
 import com.rosan.dhizuku.api.Dhizuku
 import com.rosan.dhizuku.api.DhizukuRequestPermissionListener
+import io.obtainmond.R
 import io.obtainmond.data.model.ObtainmondSettings
 import io.obtainmond.data.model.PrivilegeBackendMode
 import io.obtainmond.rust.ObtainmondNative
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -28,8 +31,11 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import rikka.shizuku.Shizuku
 import java.io.File
+import java.nio.file.Files
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 
 data class PrivilegeStatus(
@@ -56,10 +62,11 @@ data class ShellExecOutcome(
     val exitCode: Int,
     val stdout: String,
     val stderr: String,
-    val backendUsed: String
+    val backendUsed: String,
+    val installPending: Boolean = false
 ) {
     val isSuccess: Boolean
-        get() = exitCode == 0 && !stdout.contains("Failure [", ignoreCase = true)
+        get() = !installPending && exitCode == 0 && !stdout.contains("Failure [", ignoreCase = true)
 }
 
 object PrivilegeManager {
@@ -69,6 +76,12 @@ object PrivilegeManager {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val refreshInFlight = AtomicBoolean(false)
+    private val installResults = ConcurrentHashMap<Int, CompletableDeferred<Intent>>()
+
+    internal fun onPackageInstallerResult(intent: Intent) {
+        val sessionId = intent.getIntExtra(PackageInstaller.EXTRA_SESSION_ID, -1)
+        installResults[sessionId]?.complete(intent)
+    }
 
     private val _status = MutableStateFlow(PrivilegeStatus())
     val status: StateFlow<PrivilegeStatus> = _status.asStateFlow()
@@ -428,6 +441,17 @@ object PrivilegeManager {
         return apks
     }
 
+    fun resolveRollbackBackup(context: Context, packageName: String, path: String): File? = runCatching {
+        val safePkg = validatePackageName(packageName)
+        val vault = File(context.filesDir, "rollback_vault").canonicalFile
+        File(path).canonicalFile.takeIf {
+            it.parentFile == vault && (
+                it.name == safePkg || it.name == "${safePkg}_rollback.apk" ||
+                    it.name.startsWith("${safePkg}_rollback_")
+                )
+        }
+    }.getOrNull()
+
     fun analyzeRollbackDowngradeFailure(
         context: Context,
         packageName: String,
@@ -461,12 +485,13 @@ object PrivilegeManager {
 
     /**
      * Copies the currently installed base APK and any split APKs of [packageName] into
-     * `filesDir/rollback_vault/<packageName>/` before an update so rollback handles Split APKs cleanly.
+     * a new rollback snapshot before an update so the previous backup stays intact.
      */
     suspend fun backupInstalledApkForRollback(
         context: Context,
         packageName: String
     ): File? = withContext(Dispatchers.IO) {
+        var newBackup: File? = null
         runCatching {
             val safePkg = validatePackageName(packageName)
             val appInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -482,22 +507,16 @@ object PrivilegeManager {
             if (!srcBase.exists()) return@withContext null
 
             val vaultRoot = File(context.filesDir, "rollback_vault").apply { mkdirs() }
-            File(vaultRoot, "${safePkg}_rollback.apk").takeIf { it.exists() }?.delete()
-
-            val pkgVaultDir = File(vaultRoot, safePkg).apply {
-                if (exists()) deleteRecursively()
-                mkdirs()
-            }
-            srcBase.copyTo(File(pkgVaultDir, "base.apk"), overwrite = true)
+            val pkgVaultDir = Files.createTempDirectory(vaultRoot.toPath(), "${safePkg}_rollback_").toFile()
+            newBackup = pkgVaultDir
+            srcBase.copyTo(File(pkgVaultDir, "base.apk"))
 
             val splits = appInfo.splitSourceDirs?.filter { it.isNotBlank() }.orEmpty()
             splits.forEachIndexed { idx, splitPath ->
                 val splitSrc = File(splitPath)
-                if (splitSrc.exists() && splitSrc.isFile) {
-                    val safeName = splitSrc.name.replace(Regex("[^a-zA-Z0-9._-]"), "_")
-                        .let { if (it.endsWith(".apk", ignoreCase = true)) it else "$it.apk" }
-                    splitSrc.copyTo(File(pkgVaultDir, "split_${idx}_$safeName"), overwrite = true)
-                }
+                val safeName = splitSrc.name.replace(Regex("[^a-zA-Z0-9._-]"), "_")
+                    .let { if (it.endsWith(".apk", ignoreCase = true)) it else "$it.apk" }
+                splitSrc.copyTo(File(pkgVaultDir, "split_${idx}_$safeName"))
             }
 
             val debuggable = (appInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
@@ -506,7 +525,10 @@ object PrivilegeManager {
                 Charsets.UTF_8
             )
             pkgVaultDir
-        }.getOrNull()
+        }.getOrElse {
+            newBackup?.deleteRecursively()
+            null
+        }
     }
 
     suspend fun installApkSilentlyOrFallback(
@@ -533,7 +555,7 @@ object PrivilegeManager {
         externalSourceFile: File? = null
     ): ShellExecOutcome = withContext(Dispatchers.IO) {
         val validApks = apkFiles.filter { it.exists() && it.isFile && it.length() >= 22L }
-        if (validApks.isEmpty()) {
+        if (validApks.isEmpty() || validApks.size != apkFiles.size) {
             return@withContext ShellExecOutcome(-1, "", "No valid APK files to install", "Validation")
         }
 
@@ -584,8 +606,11 @@ object PrivilegeManager {
             settings.privilegeMode == PrivilegeBackendMode.AUTO
         ) {
             val dhizukuOutcome = tryDhizukuPackageInstallerSession(context, validApks, safeTargetPkg)
-            if (dhizukuOutcome != null && (dhizukuOutcome.isSuccess || settings.privilegeMode == PrivilegeBackendMode.DHIZUKU)) {
+            if (dhizukuOutcome != null) {
                 return@withContext dhizukuOutcome
+            }
+            if (settings.privilegeMode == PrivilegeBackendMode.DHIZUKU) {
+                return@withContext ShellExecOutcome(-1, "", context.getString(R.string.dhizuku_session_unavailable), "Dhizuku")
             }
         }
 
@@ -672,6 +697,7 @@ object PrivilegeManager {
                 append("cp ${shellQuote(file.absolutePath)} ${shellQuote(staged)} && chmod 644 ${shellQuote(staged)} && ")
             }
             append("SESSION_OUT=\$(pm install-create $flags 2>&1) ; ")
+            append("CREATE_EXIT=\$? ; if [ \$CREATE_EXIT -ne 0 ]; then echo \"\$SESSION_OUT\"; rm -rf ${shellQuote(stageDir)}; exit \$CREATE_EXIT; fi ; ")
             append("SID=\$(echo \"\$SESSION_OUT\" | sed -n 's/.*\\[\\([0-9]*\\)\\].*/\\1/p' | head -n1) ; ")
             append("if [ -z \"\$SID\" ]; then echo \"\$SESSION_OUT\"; rm -rf ${shellQuote(stageDir)}; exit 1; fi ; ")
             apkFiles.forEachIndexed { idx, file ->
@@ -708,26 +734,21 @@ object PrivilegeManager {
         execPrivilegedShell(script, settings.privilegeMode, timeoutMs = 60_000L)
     }
 
-    private fun tryDhizukuPackageInstallerSession(
+    private suspend fun tryDhizukuPackageInstallerSession(
         context: Context,
         apkFiles: List<File>,
         targetPackageId: String
     ): ShellExecOutcome? {
-        val avail = runCatching { Dhizuku.init(context) }.getOrDefault(false)
-        if (!avail) {
-            return ShellExecOutcome(-1, "", "Dhizuku Device Owner service is unavailable", "Dhizuku")
-        }
-        val granted = runCatching { Dhizuku.isPermissionGranted() }.getOrDefault(false)
-        if (!granted) {
-            return ShellExecOutcome(-1, "", "Dhizuku permission not granted", "Dhizuku")
-        }
         return runCatching {
+            if (!Dhizuku.init(context) || !Dhizuku.isPermissionGranted()) {
+                return@runCatching null
+            }
             val sysPi = context.packageManager.packageInstaller
             val installerField = PackageInstaller::class.java.getDeclaredField("mInstaller").apply {
                 isAccessible = true
             }
             val origInstaller = installerField.get(sysPi) as? IInterface
-                ?: return@runCatching ShellExecOutcome(-1, "", "Unable to access system PackageInstaller binder", "Dhizuku")
+                ?: return@runCatching null
             val wrappedBinder = Dhizuku.binderWrapper(origInstaller.asBinder())
             val stubClass = Class.forName("android.content.pm.IPackageInstaller\$Stub")
             val wrappedProxy = stubClass.getMethod("asInterface", IBinder::class.java)
@@ -747,7 +768,7 @@ object PrivilegeManager {
                 }
             }
             val pi = dhizukuPi
-                ?: return@runCatching ShellExecOutcome(-1, "", "Unsupported PackageInstaller constructor for Dhizuku", "Dhizuku")
+                ?: return@runCatching null
 
             commitStandardPackageInstallerSession(
                 packageInstaller = pi,
@@ -755,20 +776,24 @@ object PrivilegeManager {
                 apkFiles = apkFiles,
                 targetPackageId = targetPackageId,
                 backendLabel = "Dhizuku Device Owner"
-            ) ?: ShellExecOutcome(-1, "", "Dhizuku session creation failed", "Dhizuku")
+            )
         }.getOrElse { e ->
-            ShellExecOutcome(-1, "", e.message ?: "Dhizuku binder call failed", "Dhizuku")
+            if (e is CancellationException) throw e
+            null
         }
     }
 
-    private fun commitStandardPackageInstallerSession(
+    private suspend fun commitStandardPackageInstallerSession(
         packageInstaller: PackageInstaller,
         context: Context,
         apkFiles: List<File>,
         targetPackageId: String,
         backendLabel: String
     ): ShellExecOutcome? {
-        return runCatching {
+        var sessionId: Int? = null
+        var committed = false
+        val result = CompletableDeferred<Intent>()
+        try {
             val totalSize = apkFiles.sumOf { it.length() }
             val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
                 setSize(totalSize)
@@ -786,8 +811,10 @@ object PrivilegeManager {
                     setApplicationEnabledSettingPersistent()
                 }
             }
-            val sessionId = packageInstaller.createSession(params)
-            packageInstaller.openSession(sessionId).use { session ->
+            val id = packageInstaller.createSession(params)
+            sessionId = id
+            installResults[id] = result
+            packageInstaller.openSession(id).use { session ->
                 apkFiles.forEachIndexed { idx, apkFile ->
                     val entryName = if (idx == 0) "base.apk" else "split_${idx}.apk"
                     apkFile.inputStream().use { input ->
@@ -808,19 +835,36 @@ object PrivilegeManager {
                     }
                 val pendingIntent = PendingIntent.getBroadcast(
                     context,
-                    sessionId,
+                    id,
                     callbackIntent,
                     pendingFlags
                 )
                 session.commit(pendingIntent.intentSender)
+                committed = true
             }
-            ShellExecOutcome(
-                exitCode = 0,
-                stdout = "Committed PackageInstaller session ($backendLabel)",
-                stderr = "",
-                backendUsed = backendLabel
-            )
-        }.getOrNull()
+            val statusIntent = withTimeoutOrNull(300_000L) { result.await() }
+                ?: return ShellExecOutcome(0, "", "", backendLabel, installPending = true)
+            val status = statusIntent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
+            return if (status == PackageInstaller.STATUS_SUCCESS) {
+                ShellExecOutcome(0, "Success", "", backendLabel)
+            } else {
+                ShellExecOutcome(
+                    status,
+                    "",
+                    statusIntent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)
+                        ?: context.getString(R.string.package_install_failed),
+                    backendLabel
+                )
+            }
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            return if (committed) ShellExecOutcome(0, "", "", backendLabel, installPending = true) else null
+        } finally {
+            sessionId?.let { id ->
+                installResults.remove(id)
+                if (!committed) runCatching { packageInstaller.abandonSession(id) }
+            }
+        }
     }
 
     private suspend fun launchExternalInstaller(
@@ -861,7 +905,8 @@ object PrivilegeManager {
                 exitCode = 0,
                 stdout = "Launched External Installer (${installerPackage.ifBlank { "chooser" }})",
                 stderr = "",
-                backendUsed = installerPackage.ifBlank { "System PackageInstaller" }
+                backendUsed = installerPackage.ifBlank { "System PackageInstaller" },
+                installPending = true
             )
         }.getOrElse { e ->
             ShellExecOutcome(

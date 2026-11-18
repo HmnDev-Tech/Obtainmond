@@ -4,6 +4,7 @@ import io.obtainmond.data.model.ObtainmondSettings
 import io.obtainmond.data.model.TrackedApp
 import io.obtainmond.data.model.VerificationPolicy
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
@@ -69,7 +70,7 @@ class SupplyChainVerifier(
         }
 
         // 3. Optional VirusTotal API v3 hash check
-        if (settings.virusTotalPolicy != VerificationPolicy.OFF && virusTotalApiKey.isNotBlank()) {
+        if (settings.virusTotalPolicy != VerificationPolicy.OFF) {
             checks.add(
                 checkVirusTotalHash(apkSha256Hex, virusTotalApiKey, settings.virusTotalPolicy)
             )
@@ -250,8 +251,9 @@ class SupplyChainVerifier(
         return if (count > 0) {
             SupplyChainCheckResult(
                 checkName = "GitHub Attestation",
-                status = "VERIFIED",
-                summary = "Found $count Sigstore build provenance attestation(s)"
+                status = if (policy == VerificationPolicy.ENFORCE) "FAILED" else "WARNING",
+                summary = "Found $count attestation(s); cryptographic verification is unavailable",
+                shouldBlock = policy == VerificationPolicy.ENFORCE
             )
         } else {
             SupplyChainCheckResult(
@@ -268,31 +270,19 @@ class SupplyChainVerifier(
         apiKey: String,
         policy: VerificationPolicy
     ): SupplyChainCheckResult {
+        if (apiKey.isBlank()) {
+            return virusTotalUnavailable(policy, "VirusTotal API key is missing")
+        }
         val url = "https://www.virustotal.com/api/v3/files/${apkSha256Hex.lowercase()}"
         val resp = runCatching { fetchUrl(url, mapOf("x-apikey" to apiKey.trim())) }.getOrNull()
         if (resp == null) {
-            return SupplyChainCheckResult(
-                checkName = "VirusTotal",
-                status = if (policy == VerificationPolicy.ENFORCE) "FAILED" else "WARNING",
-                summary = "VirusTotal API lookup unreachable",
-                shouldBlock = policy == VerificationPolicy.ENFORCE
-            )
+            return virusTotalUnavailable(policy, "VirusTotal API lookup unreachable")
         }
         if (resp.code == 404) {
-            return SupplyChainCheckResult(
-                checkName = "VirusTotal",
-                status = "WARNING",
-                summary = "Hash not yet indexed on VirusTotal",
-                shouldBlock = false
-            )
+            return virusTotalUnavailable(policy, "Hash not yet indexed on VirusTotal")
         }
         if (resp.code !in 200..299) {
-            return SupplyChainCheckResult(
-                checkName = "VirusTotal",
-                status = if (policy == VerificationPolicy.ENFORCE) "FAILED" else "WARNING",
-                summary = "VirusTotal returned HTTP ${resp.code}",
-                shouldBlock = policy == VerificationPolicy.ENFORCE
-            )
+            return virusTotalUnavailable(policy, "VirusTotal returned HTTP ${resp.code}")
         }
 
         val stats = runCatching {
@@ -301,10 +291,13 @@ class SupplyChainVerifier(
                 ?.get("last_analysis_stats")?.jsonObject
         }.getOrNull()
 
-        val malicious = stats?.get("malicious")?.jsonPrimitive?.intOrNull ?: 0
-        val suspicious = stats?.get("suspicious")?.jsonPrimitive?.intOrNull ?: 0
-        val harmless = stats?.get("harmless")?.jsonPrimitive?.intOrNull ?: 0
-        val undetected = stats?.get("undetected")?.jsonPrimitive?.intOrNull ?: 0
+        val malicious = (stats?.get("malicious") as? JsonPrimitive)?.intOrNull?.takeIf { it >= 0 }
+        val suspicious = (stats?.get("suspicious") as? JsonPrimitive)?.intOrNull?.takeIf { it >= 0 }
+        if (malicious == null || suspicious == null) {
+            return virusTotalUnavailable(policy, "VirusTotal analysis results are missing or invalid")
+        }
+        val harmless = (stats?.get("harmless") as? JsonPrimitive)?.intOrNull ?: 0
+        val undetected = (stats?.get("undetected") as? JsonPrimitive)?.intOrNull ?: 0
 
         return if (malicious > 0) {
             SupplyChainCheckResult(
@@ -320,6 +313,8 @@ class SupplyChainVerifier(
                 summary = "$suspicious engine(s) flagged suspicious ($malicious malicious)",
                 shouldBlock = policy == VerificationPolicy.ENFORCE
             )
+        } else if (harmless <= 0 && undetected <= 0) {
+            virusTotalUnavailable(policy, "VirusTotal has no completed engine results")
         } else {
             SupplyChainCheckResult(
                 checkName = "VirusTotal",
@@ -328,6 +323,13 @@ class SupplyChainVerifier(
             )
         }
     }
+
+    private fun virusTotalUnavailable(policy: VerificationPolicy, summary: String) = SupplyChainCheckResult(
+        checkName = "VirusTotal",
+        status = if (policy == VerificationPolicy.ENFORCE) "FAILED" else "WARNING",
+        summary = summary,
+        shouldBlock = policy == VerificationPolicy.ENFORCE
+    )
 
     companion object {
         fun extractGitHubOwnerRepo(url: String): Pair<String, String>? {

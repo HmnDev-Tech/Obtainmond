@@ -592,7 +592,7 @@ fun ObtainedLabsScreen(
                         ExpressiveTonalButton(
                             onClick = {
                                 scope.launch {
-                                    val ok = AppRepository.rollbackAppToBackup(app.id)
+                                    val ok = AppRepository.rollbackAppToBackup(app.id) ?: return@launch
                                     Toast.makeText(
                                         context,
                                         if (ok) "Rolled back ${app.name}" else "Rollback failed — see Logs / Attention",
@@ -1182,7 +1182,7 @@ private fun SecurityVerificationSubPage(
         item {
             VerificationPolicySelectorCard(
                 title = stringResource(R.string.label_github_attestation),
-                subtitle = "Verifies Sigstore/SLSA artifact provenance via GitHub REST Attestations API",
+                subtitle = stringResource(R.string.desc_github_attestation),
                 selected = settings.githubAttestationPolicy,
                 onSelect = { pol -> AppRepository.updateSettings { it.copy(githubAttestationPolicy = pol) } }
             )
@@ -1640,7 +1640,7 @@ private fun GitHubNetworkSubPage(
                             gitlabTokenInput = it
                             AppRepository.updateGitLabToken(it)
                         },
-                        placeholder = { Text("glpat-... (self-hosted or private GitLab releases)") },
+                        placeholder = { Text(stringResource(R.string.gitlab_token_placeholder)) },
                         visualTransformation = if (revealTokens) VisualTransformation.None else PasswordVisualTransformation(),
                         singleLine = true,
                         shape = RoundedCornerShape(16.dp),

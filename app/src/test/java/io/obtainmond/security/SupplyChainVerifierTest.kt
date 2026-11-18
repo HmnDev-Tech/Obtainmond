@@ -149,7 +149,33 @@ class SupplyChainVerifierTest {
 
         assertTrue("VirusTotal malicious > 0 must block even under AUDIT", combined.shouldBlock)
         assertEquals(2, combined.checks.size)
-        assertEquals("VERIFIED", combined.checks[0].status)
+        assertEquals("FAILED", combined.checks[0].status)
+        assertTrue(combined.checks[0].shouldBlock)
         assertEquals("FAILED", combined.checks[1].status)
+        assertTrue(combined.checks[1].shouldBlock)
+    }
+
+    @Test
+    fun virusTotalEnforceRequiresCompletedAnalysis() {
+        val app = TrackedApp(id = "org.sample.app", name = "Sample", url = "https://example.com/app.apk")
+        val settings = ObtainmondSettings(
+            githubAttestationPolicy = VerificationPolicy.OFF,
+            virusTotalPolicy = VerificationPolicy.ENFORCE
+        )
+        val responses = listOf(
+            HttpFetchResponse(404, ""),
+            HttpFetchResponse(200, """{"data":{"attributes":{}}}"""),
+            HttpFetchResponse(200, """{"data":{"attributes":{"last_analysis_stats":{"malicious":0,"suspicious":0}}}}""")
+        )
+
+        for (response in responses) {
+            val verifier = SupplyChainVerifier { _, _ -> response }
+            val result = verifier.verify(app, app.id, sampleSha, settings, virusTotalApiKey = "test-key")
+            assertTrue(result.shouldBlock)
+            assertEquals("FAILED", result.checks.single().status)
+        }
+
+        val missingKey = SupplyChainVerifier { _, _ -> error("A request requires an API key") }
+        assertTrue(missingKey.verify(app, app.id, sampleSha, settings).shouldBlock)
     }
 }

@@ -26,6 +26,8 @@ class PackageInstallerStatusReceiver : BroadcastReceiver() {
                     context.startActivity(confirmIntent)
                 }
             }
+        } else if (status >= PackageInstaller.STATUS_SUCCESS) {
+            PrivilegeManager.onPackageInstallerResult(intent)
         }
     }
 }

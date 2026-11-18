@@ -2,6 +2,7 @@ package io.obtainmond.security
 
 import java.io.File
 import java.io.FileOutputStream
+import java.io.OutputStream
 import java.util.zip.ZipInputStream
 
 data class ObbStageEntry(
@@ -53,6 +54,19 @@ object SplitBundleExtractor {
         var totalBytes = 0L
 
         ZipInputStream(bundleFile.inputStream().buffered()).use { zis ->
+            val buffer = ByteArray(64 * 1024)
+            fun readEntry(output: OutputStream?) {
+                while (true) {
+                    val read = zis.read(buffer)
+                    if (read < 0) break
+                    totalBytes += read
+                    require(totalBytes <= MAX_UNCOMPRESSED_BYTES) {
+                        "Split bundle exceeds maximum safe uncompressed size"
+                    }
+                    output?.write(buffer, 0, read)
+                }
+            }
+
             var entry = zis.nextEntry
             while (entry != null) {
                 entryCount++
@@ -75,18 +89,7 @@ object SplitBundleExtractor {
                             "Zip-slip escape rejected: $rawName"
                         }
 
-                        FileOutputStream(outFile).use { fos ->
-                            val buf = ByteArray(64 * 1024)
-                            while (true) {
-                                val read = zis.read(buf)
-                                if (read <= 0) break
-                                totalBytes += read
-                                require(totalBytes <= MAX_UNCOMPRESSED_BYTES) {
-                                    "Split bundle exceeds maximum safe uncompressed size"
-                                }
-                                fos.write(buf, 0, read)
-                            }
-                        }
+                        FileOutputStream(outFile).use { readEntry(it) }
 
                         if (isApk) {
                             extractedApks.add(outFile)
@@ -98,7 +101,11 @@ object SplitBundleExtractor {
                             }
                             extractedObbs.add(ObbStageEntry(outFile, normalizedObbRel))
                         }
+                    } else {
+                        readEntry(null)
                     }
+                } else {
+                    readEntry(null)
                 }
                 zis.closeEntry()
                 entry = zis.nextEntry

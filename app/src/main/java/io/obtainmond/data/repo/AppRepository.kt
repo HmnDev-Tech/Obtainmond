@@ -7,6 +7,7 @@ import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
+import io.obtainmond.R
 import io.obtainmond.data.model.AppEventLog
 import io.obtainmond.data.model.FolderRule
 import io.obtainmond.data.model.ObtainmondSettings
@@ -20,6 +21,7 @@ import io.obtainmond.security.HttpFetchResponse
 import io.obtainmond.security.SplitBundleExtractor
 import io.obtainmond.security.SupplyChainVerifier
 import io.obtainmond.worker.AutoUpdateWorker
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -30,6 +32,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
@@ -41,11 +44,13 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.File
+import java.nio.file.Files
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -80,6 +85,22 @@ object AppRepository {
         .readTimeout(60, TimeUnit.SECONDS)
         .followRedirects(true)
         .followSslRedirects(true)
+        .addNetworkInterceptor { chain ->
+            val request = chain.request()
+            val url = request.url
+            val secureOrigin = url.isHttps && url.port == 443
+            val builder = request.newBuilder()
+            if (!secureOrigin || url.host != "api.github.com") {
+                builder.removeHeader("Authorization")
+            }
+            if (!secureOrigin || url.host != "gitlab.com") {
+                builder.removeHeader("PRIVATE-TOKEN")
+            }
+            if (!secureOrigin || url.host != "www.virustotal.com") {
+                builder.removeHeader("x-apikey")
+            }
+            chain.proceed(builder.build())
+        }
         .build()
 
     private lateinit var appContext: Context
@@ -111,6 +132,16 @@ object AppRepository {
     private lateinit var appStorage: AtomicAppStorage
     private val githubTokenCursor = AtomicInteger(0)
     private val logLock = Any()
+    private val apkCacheLock = Any()
+    private val activeApkDownloads = mutableSetOf<File>()
+
+    private fun tryMarkAppBusy(appId: String): Boolean {
+        while (true) {
+            val current = _busyAppIds.value
+            if (appId in current) return false
+            if (_busyAppIds.compareAndSet(current, current + appId)) return true
+        }
+    }
 
     fun init(context: Context) {
         if (::appContext.isInitialized) return
@@ -237,7 +268,7 @@ object AppRepository {
         }
     }
 
-    private fun saveAppsToDisk(list: List<TrackedApp>) {
+    private fun saveAppsToDisk(list: List<TrackedApp>): Boolean =
         runCatching {
             if (::appStorage.isInitialized) {
                 appStorage.syncList(list)
@@ -248,8 +279,7 @@ object AppRepository {
             } else {
                 appsFile().writeText(json.encodeToString(list))
             }
-        }
-    }
+        }.isSuccess
 
     private fun refreshSecretStatus() {
         val secrets = if (::secretStore.isInitialized) secretStore.load() else StoredSecrets()
@@ -428,7 +458,7 @@ object AppRepository {
     /**
      * Inspects Android's PackageManager strictly by exact package ID for every tracked app.
      */
-    suspend fun syncInstalledPackagesState() = withContext(Dispatchers.IO) {
+    suspend fun syncInstalledPackagesState(): Unit = withContext(Dispatchers.IO) {
         mutex.withLock {
             val pm = appContext.packageManager
             val installedByPkg by lazy {
@@ -588,15 +618,21 @@ object AppRepository {
     }
 
     suspend fun checkSingleApp(appId: String): Result<TrackedApp> = withContext(Dispatchers.IO) {
-        _busyAppIds.value = _busyAppIds.value + appId
+        if (!tryMarkAppBusy(appId)) {
+            return@withContext Result.failure(IllegalStateException(appContext.getString(R.string.app_operation_in_progress)))
+        }
         try {
             syncInstalledPackagesState()
             val current = _apps.value.firstOrNull { it.id == appId }
                 ?: return@withContext Result.failure(IllegalStateException("App not found"))
             val result = runCatching { fetchLatestReleaseForApp(current) }
+            result.exceptionOrNull()?.let { if (it is CancellationException) throw it }
             result.onSuccess { updated ->
                 mutex.withLock {
-                    val next = _apps.value.map { if (it.id == appId) updated else it }
+                    if (current !in _apps.value) {
+                        return@withContext Result.failure(IllegalStateException(appContext.getString(R.string.app_changed_during_refresh)))
+                    }
+                    val next = _apps.value.map { if (it == current) updated else it }
                     _apps.value = next
                     saveAppsToDisk(next)
                 }
@@ -614,7 +650,7 @@ object AppRepository {
             }
             result
         } finally {
-            _busyAppIds.value = _busyAppIds.value - appId
+            _busyAppIds.update { it - appId }
         }
     }
 
@@ -688,11 +724,13 @@ object AppRepository {
         if (sourceType == "RUSTORE") {
             baseHeaders["ruStoreVerCode"] = "110802"
         }
-        if (sourceType == "GITLAB" && gitlabToken.isNotBlank()) {
+        val url = endpoint.toHttpUrlOrNull()
+        val secureOrigin = url != null && url.isHttps && url.port == 443
+        if (sourceType == "GITLAB" && secureOrigin && url?.host == "gitlab.com" && gitlabToken.isNotBlank()) {
             baseHeaders["PRIVATE-TOKEN"] = gitlabToken
         }
 
-        if (sourceType == "GITHUB" && githubTokens.isNotEmpty()) {
+        if (sourceType == "GITHUB" && secureOrigin && url?.host == "api.github.com" && githubTokens.isNotEmpty()) {
             val startIdx = (tokenCursor.getAndIncrement() and 0x7FFFFFFF) % githubTokens.size
             var lastCode = 0
             for (attempt in githubTokens.indices) {
@@ -733,7 +771,10 @@ object AppRepository {
                     app
                 } else {
                     sem.withPermit {
-                        runCatching { fetcher(app) }.getOrElse { e -> onError(app, e) }
+                        runCatching { fetcher(app) }.getOrElse { e ->
+                            if (e is CancellationException) throw e
+                            onError(app, e)
+                        }
                     }
                 }
             }
@@ -930,8 +971,10 @@ object AppRepository {
         )
 
         mutex.withLock {
-            _apps.value = updatedList
-            saveAppsToDisk(updatedList)
+            val updatesByOriginal = snapshot.zip(updatedList).toMap()
+            val next = _apps.value.map { updatesByOriginal[it] ?: it }
+            _apps.value = next
+            saveAppsToDisk(next)
         }
 
         var installedCount = 0
@@ -1011,9 +1054,12 @@ object AppRepository {
             return@withContext false
         }
 
-        _busyAppIds.value = _busyAppIds.value + appId
+        if (!tryMarkAppBusy(appId)) return@withContext false
         var stagingDir: File? = null
         var downloadedFile: File? = null
+        var keepForInstaller = false
+        var newBackup: File? = null
+        var backupInUse = false
         val currentSettings = _settings.value
         try {
             val (effectiveUrl, usedMirror) = resolveEffectiveDownloadUrl(rawDownloadUrl, currentSettings)
@@ -1025,7 +1071,10 @@ object AppRepository {
                 .replace(Regex("[^a-zA-Z0-9._-]"), "_")
                 .trimStart('.')
                 .ifBlank { "obtainmond_download.$fallbackExt" }
-            val targetPackageFile = File(downloadsDir, safeFileName)
+            val targetPackageFile = synchronized(apkCacheLock) {
+                File.createTempFile("download_", "_${safeFileName.takeLast(180)}", downloadsDir)
+                    .also { activeApkDownloads.add(it) }
+            }
             downloadedFile = targetPackageFile
 
             val req = Request.Builder()
@@ -1048,7 +1097,7 @@ object AppRepository {
             val apkFilesToInstall: List<File>
             val obbFiles: List<File>
             if (isSplitBundle) {
-                val bundleStaging = File(downloadsDir, "staging_${currentApp.id.replace('.', '_')}_${System.currentTimeMillis()}")
+                val bundleStaging = Files.createTempDirectory(appContext.cacheDir.toPath(), "apk_staging_").toFile()
                 stagingDir = bundleStaging
                 val extracted = SplitBundleExtractor.extractBundle(
                     bundleFile = targetPackageFile,
@@ -1063,13 +1112,12 @@ object AppRepository {
             }
 
             val enforceStrictGuard = currentSettings.labRustAbiAndSignatureGuard || usedMirror
-            var primaryIntegrity = ObtainmondNative.inspectApk(apkFilesToInstall.first().absolutePath)
+            val primaryIntegrity = ObtainmondNative.inspectApk(apkFilesToInstall.first().absolutePath)
             val splitCertSets = mutableListOf<Set<String>>()
-            var firstSigResult = ApkSignatureVerifier.verifyApkFile(apkFilesToInstall.first())
+            val firstSigResult = ApkSignatureVerifier.verifyApkFile(apkFilesToInstall.first())
 
             for ((idx, apkFile) in apkFilesToInstall.withIndex()) {
                 val integrity = if (idx == 0) primaryIntegrity else ObtainmondNative.inspectApk(apkFile.absolutePath)
-                if (idx == 0) primaryIntegrity = integrity
 
                 if (enforceStrictGuard) {
                     if (!integrity.validApkZip || !integrity.hasManifest || !integrity.hasSignatureBlock) {
@@ -1101,7 +1149,12 @@ object AppRepository {
                 }
 
                 val sigResult = if (idx == 0) firstSigResult else ApkSignatureVerifier.verifyApkFile(apkFile)
-                if (idx == 0) firstSigResult = sigResult
+                if (!sigResult.isVerified || sigResult.signerCertSha256s.isEmpty()) {
+                    val reason = sigResult.error ?: appContext.getString(R.string.package_signature_invalid)
+                    markAppError(currentApp.id, "SIGNATURE_MISMATCH", reason)
+                    appendLog(currentApp.id, currentApp.name, "APK Signature Guard", "apksig", reason, false)
+                    return@withContext false
+                }
                 splitCertSets.add(sigResult.signerCertSha256s.map { it.lowercase() }.toSet())
             }
 
@@ -1136,6 +1189,13 @@ object AppRepository {
             }.getOrNull()
 
             val realPackageId = archiveInfo?.packageName?.takeIf { it.isNotBlank() } ?: currentApp.id
+            if (realPackageId != currentApp.id &&
+                ApkSignatureVerifier.getInstalledPackageCertSha256s(appContext, currentApp.id).isNotEmpty()
+            ) {
+                val reason = appContext.getString(R.string.package_id_mismatch, currentApp.id, realPackageId)
+                markAppError(currentApp.id, "INTEGRITY_FAILED", reason)
+                return@withContext false
+            }
             val installedCerts = ApkSignatureVerifier.getInstalledPackageCertSha256s(appContext, realPackageId)
             val mustVerifyCryptoSig = enforceStrictGuard || installedCerts.isNotEmpty() || currentApp.pinnedSigningCertSha256.isNotBlank()
             if (mustVerifyCryptoSig) {
@@ -1193,6 +1253,7 @@ object AppRepository {
             if (currentSettings.labInstantRollbackBackup && currentApp.installedVersion.isNotBlank()) {
                 val backupDir = PrivilegeManager.backupInstalledApkForRollback(appContext, realPackageId)
                 if (backupDir != null) {
+                    newBackup = backupDir
                     backupPath = backupDir.absolutePath
                     backupVer = currentApp.installedVersion
                 }
@@ -1208,6 +1269,10 @@ object AppRepository {
                 externalSourceFile = if (isSplitBundle) targetPackageFile else null
             )
 
+            if (installOutcome.installPending) {
+                keepForInstaller = true
+                return@withContext false
+            }
             val succeeded = installOutcome.isSuccess
             appendLog(
                 appId = realPackageId,
@@ -1222,9 +1287,9 @@ object AppRepository {
 
             if (succeeded) {
                 val releaseTag = currentApp.latestVersion.ifBlank { archiveVersion }
-                mutex.withLock {
+                val storedBackup = mutex.withLock {
                     _apps.value = _apps.value.map { item ->
-                        if (item.id == appId || item.id == realPackageId) {
+                        if (item.id == appId && item.url == currentApp.url) {
                             item.copy(
                                 id = realPackageId,
                                 installedVersion = archiveVersion,
@@ -1245,7 +1310,14 @@ object AppRepository {
                             item
                         }
                     }
-                    saveAppsToDisk(_apps.value)
+                    backupInUse = newBackup != null && _apps.value.any { it.backupApkPath == backupPath }
+                    saveAppsToDisk(_apps.value) && backupInUse
+                }
+                if (storedBackup && currentApp.backupApkPath.isNotBlank()) {
+                    runCatching {
+                        PrivilegeManager.resolveRollbackBackup(appContext, realPackageId, currentApp.backupApkPath)
+                            ?.deleteRecursively()
+                    }
                 }
                 syncInstalledPackagesState()
                 if (currentSettings.showUpdateNotifications) {
@@ -1261,6 +1333,7 @@ object AppRepository {
             }
             succeeded
         } catch (e: Throwable) {
+            if (e is CancellationException) throw e
             val (cat, msg) = categorizeError(e)
             markAppError(currentApp.id, cat, msg)
             appendLog(
@@ -1274,10 +1347,14 @@ object AppRepository {
             false
         } finally {
             stagingDir?.let { runCatching { it.deleteRecursively() } }
-            if (currentSettings.deleteApkAfterInstall) {
-                downloadedFile?.let { runCatching { it.delete() } }
+            if (!backupInUse) newBackup?.let { runCatching { it.deleteRecursively() } }
+            synchronized(apkCacheLock) {
+                downloadedFile?.let {
+                    if (currentSettings.deleteApkAfterInstall && !keepForInstaller) runCatching { it.delete() }
+                    activeApkDownloads.remove(it)
+                }
             }
-            _busyAppIds.value = _busyAppIds.value - appId
+            _busyAppIds.update { it - appId }
         }
     }
 
@@ -1285,16 +1362,17 @@ object AppRepository {
      * 1-Click Instant Rollback: restores all backed-up APKs (base + splits) and surfaces
      * Android 7+ `INSTALL_FAILED_VERSION_DOWNGRADE` diagnostic guidance cleanly on failure.
      */
-    suspend fun rollbackAppToBackup(appId: String): Boolean = withContext(Dispatchers.IO) {
+    suspend fun rollbackAppToBackup(appId: String): Boolean? = withContext(Dispatchers.IO) {
         val app = _apps.value.firstOrNull { it.id == appId } ?: return@withContext false
         if (app.backupApkPath.isBlank()) return@withContext false
-        val backupApks = PrivilegeManager.resolveBackupApkFiles(File(app.backupApkPath))
+        val backupFile = PrivilegeManager.resolveRollbackBackup(appContext, app.id, app.backupApkPath)
+        val backupApks = backupFile?.let { PrivilegeManager.resolveBackupApkFiles(it) }.orEmpty()
         if (backupApks.isEmpty()) {
             markAppError(appId, "ROLLBACK_FAILED", "No valid rollback APK files found in vault")
             return@withContext false
         }
 
-        _busyAppIds.value = _busyAppIds.value + appId
+        if (!tryMarkAppBusy(appId)) return@withContext false
         try {
             val currentSettings = _settings.value
             val outcome = PrivilegeManager.installApksSilentlyOrFallback(
@@ -1304,6 +1382,7 @@ object AppRepository {
                 settings = currentSettings,
                 allowDowngrade = true
             )
+            if (outcome.installPending) return@withContext null
             val details = if (outcome.isSuccess) {
                 "Rolled back ${backupApks.size} APK(s) to v${app.backupVersion}: ${outcome.stdout}"
             } else {
@@ -1325,7 +1404,7 @@ object AppRepository {
             syncInstalledPackagesState()
             outcome.isSuccess
         } finally {
-            _busyAppIds.value = _busyAppIds.value - appId
+            _busyAppIds.update { it - appId }
         }
     }
 
@@ -1503,22 +1582,22 @@ object AppRepository {
         return dir.listFiles()?.sumOf { if (it.isFile) it.length() else 0L } ?: 0L
     }
 
-    fun clearApkCache(): Int {
-        if (!::appContext.isInitialized) return 0
+    fun clearApkCache(): Int = synchronized(apkCacheLock) {
+        if (!::appContext.isInitialized) return@synchronized 0
         val dir = File(appContext.cacheDir, "apk_downloads")
-        if (!dir.exists()) return 0
+        if (!dir.exists()) return@synchronized 0
         var deleted = 0
         dir.listFiles()?.forEach { file ->
             if (file.isDirectory && file.name.startsWith("staging_")) {
                 if (file.deleteRecursively()) deleted++
-            } else if (file.isFile) {
+            } else if (file.isFile && file !in activeApkDownloads) {
                 val lower = file.name.lowercase()
                 if ((lower.endsWith(".apk") || SplitBundleExtractor.isSplitBundleFile(file)) && file.delete()) {
                     deleted++
                 }
             }
         }
-        return deleted
+        deleted
     }
 
     private fun createNotificationChannel() {

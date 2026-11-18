@@ -530,7 +530,7 @@ fun AppDetailScreen(
                                                 onClick = {
                                                     showSplitMenu = false
                                                     scope.launch {
-                                                        val ok = AppRepository.rollbackAppToBackup(app.id)
+                                                        val ok = AppRepository.rollbackAppToBackup(app.id) ?: return@launch
                                                         Toast.makeText(
                                                             context,
                                                             if (ok) "Rolled back to v${app.backupVersion}" else "Rollback failed — see diagnostic alert",
@@ -1015,7 +1015,7 @@ fun AppDetailScreen(
                             ExpressiveTonalButton(
                                 onClick = {
                                     scope.launch {
-                                        val ok = AppRepository.rollbackAppToBackup(app.id)
+                                        val ok = AppRepository.rollbackAppToBackup(app.id) ?: return@launch
                                         Toast.makeText(
                                             context,
                                             if (ok) "Rolled back to v${app.backupVersion}" else "Rollback blocked — see diagnostic alert",
