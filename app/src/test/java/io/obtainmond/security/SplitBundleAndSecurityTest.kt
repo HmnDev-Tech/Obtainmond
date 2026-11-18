@@ -163,13 +163,14 @@ class SplitBundleAndSecurityTest {
         val rawUrl = "https://github.com/org/app/releases/download/v1.0/app.apk"
         val defaultSettings = ObtainmondSettings(labGitHubMirrorAcceleration = true)
         assertEquals("", defaultSettings.githubMirrorUrl)
-        assertEquals(rawUrl to false, AppRepository.resolveEffectiveDownloadUrl(rawUrl, defaultSettings))
+        val pin = "a".repeat(64)
+        assertEquals(rawUrl to false, AppRepository.resolveEffectiveDownloadUrl(rawUrl, defaultSettings, pin, false))
 
         val insecureMirror = ObtainmondSettings(
             labGitHubMirrorAcceleration = true,
             githubMirrorUrl = "http://insecure.mirror.local/"
         )
-        assertEquals(rawUrl to false, AppRepository.resolveEffectiveDownloadUrl(rawUrl, insecureMirror))
+        assertEquals(rawUrl to false, AppRepository.resolveEffectiveDownloadUrl(rawUrl, insecureMirror, pin, false))
 
         val validMirror = ObtainmondSettings(
             labGitHubMirrorAcceleration = true,
@@ -177,8 +178,11 @@ class SplitBundleAndSecurityTest {
         )
         assertEquals(
             "https://mirror.example.org/$rawUrl" to true,
-            AppRepository.resolveEffectiveDownloadUrl(rawUrl, validMirror)
+            AppRepository.resolveEffectiveDownloadUrl(rawUrl, validMirror, pin, false)
         )
+        assertEquals(rawUrl to false, AppRepository.resolveEffectiveDownloadUrl(rawUrl, validMirror, "", false))
+        val bundleUrl = rawUrl.removeSuffix(".apk") + ".apks"
+        assertEquals(bundleUrl to false, AppRepository.resolveEffectiveDownloadUrl(bundleUrl, validMirror, pin, true))
     }
 
     @Test

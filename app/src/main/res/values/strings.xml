@@ -24,6 +24,7 @@
     <string name="package_id_mismatch">Expected package %1$s, but the APK contains %2$s.</string>
     <string name="dhizuku_session_unavailable">Dhizuku could not start an install session. Check its availability and permissions.</string>
     <string name="gitlab_token_placeholder">GitLab.com personal access token</string>
+    <string name="desc_github_mirror">Uses your HTTPS mirror for single APKs with a pinned signing certificate.</string>
     <string name="label_on_demand_only">On-Demand Only</string>
     <string name="desc_on_demand_only">Skip background auto-checks; refresh only on manual demand</string>
     <string name="label_needs_attention">Needs attention</string>

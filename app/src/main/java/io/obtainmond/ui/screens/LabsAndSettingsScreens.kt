@@ -1658,7 +1658,7 @@ private fun GitHubNetworkSubPage(
                         SwitchSettingsRow(
                             icon = Icons.Rounded.Bolt,
                             title = "GitHub Mirror Acceleration",
-                            subtitle = "Routes release APK downloads via custom HTTPS mirror (signature verified)",
+                            subtitle = stringResource(R.string.desc_github_mirror),
                             checked = settings.labGitHubMirrorAcceleration,
                             shape = MaterialShapes.Gem,
                             onCheckedChange = { enabled ->

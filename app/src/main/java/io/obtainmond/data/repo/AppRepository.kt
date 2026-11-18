@@ -322,12 +322,16 @@ object AppRepository {
 
     internal fun resolveEffectiveDownloadUrl(
         rawDownloadUrl: String,
-        settings: ObtainmondSettings
+        settings: ObtainmondSettings,
+        pinnedSigningCertSha256: String,
+        isSplitBundle: Boolean
     ): Pair<String, Boolean> {
         val mirrorBase = settings.githubMirrorUrl.trim()
         val isHttpsMirror = mirrorBase.startsWith("https://", ignoreCase = true)
         if (settings.labGitHubMirrorAcceleration &&
             isHttpsMirror &&
+            pinnedSigningCertSha256.isNotBlank() &&
+            !isSplitBundle &&
             rawDownloadUrl.startsWith("https://github.com/")
         ) {
             return "${mirrorBase.trimEnd('/')}/$rawDownloadUrl" to true
@@ -1062,15 +1066,22 @@ object AppRepository {
         var backupInUse = false
         val currentSettings = _settings.value
         try {
-            val (effectiveUrl, usedMirror) = resolveEffectiveDownloadUrl(rawDownloadUrl, currentSettings)
-
             val downloadsDir = File(appContext.cacheDir, "apk_downloads").apply { mkdirs() }
             val fallbackExt = rawDownloadUrl.substringBefore('?').substringAfterLast('.', "apk")
                 .takeIf { it.lowercase() in setOf("apk", "apks", "xapk", "apkm", "zip") } ?: "apk"
-            val safeFileName = (currentApp.matchedApkName.ifBlank { "${currentApp.id}.$fallbackExt" })
+            val assetName = if (rawUrlInput == currentApp.matchedApkUrl) {
+                currentApp.matchedApkName
+            } else {
+                currentApp.availableApks.firstOrNull { it.url == rawUrlInput }?.name.orEmpty()
+            }
+            val safeFileName = assetName.ifBlank { "${currentApp.id}.$fallbackExt" }
                 .replace(Regex("[^a-zA-Z0-9._-]"), "_")
                 .trimStart('.')
                 .ifBlank { "obtainmond_download.$fallbackExt" }
+            val isSplitBundle = SplitBundleExtractor.isSplitBundleFile(File(safeFileName))
+            val (effectiveUrl, usedMirror) = resolveEffectiveDownloadUrl(
+                rawDownloadUrl, currentSettings, currentApp.pinnedSigningCertSha256, isSplitBundle
+            )
             val targetPackageFile = synchronized(apkCacheLock) {
                 File.createTempFile("download_", "_${safeFileName.takeLast(180)}", downloadsDir)
                     .also { activeApkDownloads.add(it) }
@@ -1092,7 +1103,6 @@ object AppRepository {
                 }
             }
 
-            val isSplitBundle = SplitBundleExtractor.isSplitBundleFile(targetPackageFile)
             val deviceAbis = Build.SUPPORTED_ABIS?.toList().orEmpty()
             val apkFilesToInstall: List<File>
             val obbFiles: List<File>
