@@ -83,6 +83,27 @@ class AtomicAppStorageTest {
     }
 
     @Test
+    fun resumesPartialMigrationAndKeepsAlreadyWrittenChanges() {
+        val alpha = TrackedApp(id = "com.legacy.alpha", name = "Alpha", url = "https://example.com/alpha.apk")
+        val legacyFile = File(tempFolder.root, "tracked_apps.json").apply {
+            writeText("""
+                [
+                  {"id":"com.legacy.alpha","name":"Old Alpha","url":"https://example.com/alpha.apk"},
+                  {"id":"com.legacy.beta","name":"Beta","url":"https://example.com/beta.apk"}
+                ]
+            """.trimIndent())
+        }
+        val appsDir = File(tempFolder.root, "apps")
+        AtomicAppStorage(appsDir, legacyFile).saveApp(alpha)
+
+        val reloaded = AtomicAppStorage(appsDir, legacyFile).loadAll().associateBy { it.id }
+
+        assertEquals(alpha, reloaded[alpha.id])
+        assertEquals("Beta", reloaded["com.legacy.beta"]?.name)
+        assertFalse(legacyFile.exists())
+    }
+
+    @Test
     fun concurrentWritesDoNotCorruptStore() = runBlocking {
         val appsDir = File(tempFolder.root, "apps_concurrent")
         val storage = AtomicAppStorage(appsDir = appsDir)

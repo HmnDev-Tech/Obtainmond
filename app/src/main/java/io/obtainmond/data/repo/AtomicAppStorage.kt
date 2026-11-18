@@ -46,42 +46,34 @@ class AtomicAppStorage(
             file.isFile && file.name.endsWith(".json", ignoreCase = true)
         }?.toList().orEmpty()
 
-        if (perAppFiles.isNotEmpty()) {
-            val loaded = mutableListOf<TrackedApp>()
-            for (file in perAppFiles) {
-                runCatching {
-                    val app = json.decodeFromString<TrackedApp>(file.readText())
-                    loaded.add(app)
-                    indexedFiles[app.id] = app
-                }
+        val loaded = linkedMapOf<String, TrackedApp>()
+        for (file in perAppFiles) {
+            runCatching {
+                val app = json.decodeFromString<TrackedApp>(file.readText())
+                loaded[app.id] = app
+                indexedFiles[app.id] = app
             }
-            return loaded
         }
 
         val legacy = legacyAppsFile
-        if (legacy != null && legacy.exists()) {
+        if (legacy != null && legacy.exists() && !File(appsDir, ".initialized").exists()) {
             val migrated = runCatching {
                 json.decodeFromString<List<TrackedApp>>(legacy.readText())
             }.getOrDefault(emptyList())
             if (migrated.isNotEmpty()) {
-                for (app in migrated) {
-                    saveApp(app)
-                }
+                val missing = migrated.distinctBy { it.id }.filter { it.id !in loaded }
+                val wroteAll = runCatching { missing.forEach { saveApp(it) } }.isSuccess
+                missing.forEach { loaded[it.id] = it }
                 val backupLegacy = File(legacy.parentFile, "${legacy.name}.migrated")
-                runCatching {
-                    Files.move(
-                        legacy.toPath(),
-                        backupLegacy.toPath(),
-                        StandardCopyOption.REPLACE_EXISTING
-                    )
-                }.onFailure {
-                    runCatching { legacy.renameTo(backupLegacy) }
+                if (wroteAll) {
+                    runCatching {
+                        Files.move(legacy.toPath(), backupLegacy.toPath(), StandardCopyOption.REPLACE_EXISTING)
+                    }
                 }
-                return migrated
             }
         }
 
-        return emptyList()
+        return loaded.values.toList()
     }
 
     fun saveApp(app: TrackedApp, previousId: String? = null) {
@@ -113,6 +105,12 @@ class AtomicAppStorage(
     fun syncList(apps: List<TrackedApp>) {
         appsDir.mkdirs()
         val desiredIds = apps.map { it.id }.toSet()
+        for (app in apps) {
+            if (indexedFiles[app.id] != app || !fileForAppId(app.id).exists()) {
+                saveApp(app)
+            }
+        }
+
         val staleIds = indexedFiles.keys.filter { it !in desiredIds }
         for (staleId in staleIds) {
             deleteApp(staleId)
@@ -121,12 +119,6 @@ class AtomicAppStorage(
         appsDir.listFiles { f -> f.isFile && f.name.endsWith(".json") }
             ?.filter { it.name !in expectedFileNames }
             ?.forEach { runCatching { it.delete() } }
-
-        for (app in apps) {
-            if (indexedFiles[app.id] != app || !fileForAppId(app.id).exists()) {
-                saveApp(app)
-            }
-        }
     }
 
     private fun cleanupTempFiles() {
