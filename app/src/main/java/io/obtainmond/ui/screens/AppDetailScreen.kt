@@ -98,7 +98,6 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.mikepenz.markdown.m3.Markdown
 import io.obtainmond.R
 import io.obtainmond.data.model.ObtainmondSettings
 import io.obtainmond.data.model.TrackedApp
@@ -107,6 +106,7 @@ import io.obtainmond.ui.compose.ExpressiveAppAvatar
 import io.obtainmond.ui.compose.ExpressiveShapeBadge
 import io.obtainmond.ui.compose.ExpressiveTonalButton
 import io.obtainmond.ui.compose.NavigationSettingsRow
+import io.obtainmond.ui.compose.ReleaseNotes
 import io.obtainmond.ui.compose.SettingsGroup
 import io.obtainmond.ui.compose.SwitchSettingsRow
 import io.obtainmond.ui.compose.categoryAccentColor
@@ -881,7 +881,7 @@ fun AppDetailScreen(
                                 }
                             }
                             AnimatedVisibility(visible = expandChangelog) {
-                                Markdown(
+                                ReleaseNotes(
                                     content = app.changelog,
                                     modifier = Modifier
                                         .fillMaxWidth()
