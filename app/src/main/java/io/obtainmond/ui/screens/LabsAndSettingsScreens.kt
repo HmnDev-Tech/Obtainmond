@@ -19,6 +19,8 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -29,6 +31,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -105,6 +108,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -118,6 +122,7 @@ import io.obtainmond.data.model.FolderRule
 import io.obtainmond.data.model.InstallerSpoofPreset
 import io.obtainmond.data.model.ObtainmondSettings
 import io.obtainmond.data.model.PrivilegeBackendMode
+import io.obtainmond.data.model.ReleaseNotesExpansion
 import io.obtainmond.data.model.TrackedApp
 import io.obtainmond.data.model.VerificationPolicy
 import io.obtainmond.data.repo.AppRepository
@@ -897,6 +902,43 @@ private fun AppearanceSettingsSubPage(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item { SubPageHeader("Appearance & Motion", onBack) }
+
+        item {
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(Modifier.padding(16.dp).selectableGroup()) {
+                    Text(
+                        stringResource(R.string.label_release_notes_on_app_page),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    ReleaseNotesExpansion.entries.forEach { mode ->
+                        val selected = settings.releaseNotesExpansion == mode
+                        val label = when (mode) {
+                            ReleaseNotesExpansion.REMEMBER_LAST_STATE -> R.string.release_notes_remember_last_state
+                            ReleaseNotesExpansion.ALWAYS_EXPANDED -> R.string.release_notes_always_expanded
+                            ReleaseNotesExpansion.ALWAYS_COLLAPSED -> R.string.release_notes_always_collapsed
+                        }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .selectable(selected = selected, role = Role.RadioButton) {
+                                    AppRepository.updateSettings { it.copy(releaseNotesExpansion = mode) }
+                                }
+                                .heightIn(min = 48.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            RadioButton(selected = selected, onClick = null)
+                            Text(stringResource(label))
+                        }
+                    }
+                }
+            }
+        }
 
         item {
             Surface(

@@ -29,6 +29,10 @@
     <string name="desc_on_demand_only">Skip background auto-checks; refresh only on manual demand</string>
     <string name="label_needs_attention">Needs attention</string>
     <string name="label_release_notes">Release Notes</string>
+    <string name="label_release_notes_on_app_page">Release notes on app page</string>
+    <string name="release_notes_remember_last_state">Remember last state</string>
+    <string name="release_notes_always_expanded">Always expanded</string>
+    <string name="release_notes_always_collapsed">Always collapsed</string>
     <string name="label_release_notes_details">Details</string>
     <string name="action_open_release_video">Open release video</string>
     <string name="state_expanded">Expanded</string>

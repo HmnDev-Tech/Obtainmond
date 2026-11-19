@@ -87,6 +87,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -135,7 +136,9 @@ fun AppDetailScreen(
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var showFolderDialog by remember { mutableStateOf(false) }
     var showAllAssets by remember { mutableStateOf(false) }
-    var expandChangelog by remember { mutableStateOf(true) }
+    var expandChangelog by rememberSaveable(app.id, settings.releaseNotesExpansion) {
+        mutableStateOf(settings.releaseNotesExpansion.initiallyExpanded(settings.lastReleaseNotesExpanded))
+    }
 
     val launchIntent = remember(app.id) {
         runCatching { context.packageManager.getLaunchIntentForPackage(app.id) }.getOrNull()
@@ -854,7 +857,10 @@ fun AppDetailScreen(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable { expandChangelog = !expandChangelog },
+                                    .clickable {
+                                        expandChangelog = !expandChangelog
+                                        AppRepository.rememberReleaseNotesExpansion(expandChangelog)
+                                    },
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {

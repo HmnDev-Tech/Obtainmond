@@ -186,6 +186,7 @@ fun ObtainmondRootApp(sharedUrlFromIntent: String? = null) {
 
             AnimatedContent(
                 targetState = if (!useTwoPane) openedApp else null,
+                contentKey = { it?.id },
                 transitionSpec = {
                     (scaleIn(
                         initialScale = 0.94f,

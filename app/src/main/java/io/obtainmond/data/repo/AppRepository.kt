@@ -6,12 +6,14 @@ import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.os.Build
+import android.util.AtomicFile
 import androidx.core.app.NotificationCompat
 import io.obtainmond.R
 import io.obtainmond.data.model.AppEventLog
 import io.obtainmond.data.model.FolderRule
 import io.obtainmond.data.model.ObtainmondSettings
 import io.obtainmond.data.model.PrivilegeBackendMode
+import io.obtainmond.data.model.ReleaseNotesExpansion
 import io.obtainmond.data.model.TrackedApp
 import io.obtainmond.privilege.PrivilegeManager
 import io.obtainmond.rust.ObtainmondNative
@@ -32,7 +34,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
@@ -74,6 +78,7 @@ object AppRepository {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mutex = Mutex()
+    private val settingsWriteMutex = Mutex()
     private val json = Json {
         ignoreUnknownKeys = true
         prettyPrint = true
@@ -183,9 +188,8 @@ object AppRepository {
 
     private fun loadAllFromDisk() {
         runCatching {
-            val sf = settingsFile()
-            if (sf.exists()) {
-                val rawSettings = sf.readText()
+            val rawSettings = runCatching { AtomicFile(settingsFile()).readFully().decodeToString() }.getOrNull()
+            if (rawSettings != null) {
                 val decoded = json.decodeFromString<ObtainmondSettings>(rawSettings)
                 _settings.value = decoded
                 val legacyObj = runCatching { json.parseToJsonElement(rawSettings).jsonObject }.getOrNull()
@@ -196,9 +200,9 @@ object AppRepository {
                         githubTokens = (existing.githubTokens + parseTokenPoolInput(legacyPat)).distinct()
                     )
                     secretStore.save(merged)
-                    sf.writeText(json.encodeToString(decoded))
+                    writeSettings(decoded)
                 } else if (legacyObj?.containsKey("githubPersonalAccessToken") == true) {
-                    sf.writeText(json.encodeToString(decoded))
+                    writeSettings(decoded)
                 }
             }
         }
@@ -357,15 +361,45 @@ object AppRepository {
     }
 
     fun updateSettings(transform: (ObtainmondSettings) -> ObtainmondSettings) {
-        val next = transform(_settings.value)
-        _settings.value = next
+        val next = _settings.updateAndGet(transform)
         scope.launch {
-            runCatching {
-                settingsFile().writeText(json.encodeToString(next))
-            }
+            persistSettings()
             if (next.autoWhitelistBatteryDoze) {
                 PrivilegeManager.enforceZeroBatteryRestriction(appContext, next)
             }
+        }
+    }
+
+    fun rememberReleaseNotesExpansion(expanded: Boolean) {
+        val previous = _settings.getAndUpdate {
+            if (it.releaseNotesExpansion == ReleaseNotesExpansion.REMEMBER_LAST_STATE) {
+                it.copy(lastReleaseNotesExpanded = expanded)
+            } else {
+                it
+            }
+        }
+        if (previous.releaseNotesExpansion == ReleaseNotesExpansion.REMEMBER_LAST_STATE &&
+            previous.lastReleaseNotesExpanded != expanded
+        ) {
+            scope.launch { persistSettings() }
+        }
+    }
+
+    private suspend fun persistSettings() {
+        settingsWriteMutex.withLock {
+            runCatching { writeSettings(_settings.value) }
+        }
+    }
+
+    private fun writeSettings(settings: ObtainmondSettings) {
+        val file = AtomicFile(settingsFile())
+        val output = file.startWrite()
+        try {
+            output.write(json.encodeToString(settings).encodeToByteArray())
+            file.finishWrite(output)
+        } catch (error: Exception) {
+            file.failWrite(output)
+            throw error
         }
     }
 

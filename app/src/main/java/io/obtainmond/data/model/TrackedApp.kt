@@ -27,6 +27,19 @@ enum class VerificationPolicy(val title: String) {
 }
 
 @Serializable
+enum class ReleaseNotesExpansion {
+    REMEMBER_LAST_STATE,
+    ALWAYS_EXPANDED,
+    ALWAYS_COLLAPSED;
+
+    fun initiallyExpanded(lastExpanded: Boolean): Boolean = when (this) {
+        REMEMBER_LAST_STATE -> lastExpanded
+        ALWAYS_EXPANDED -> true
+        ALWAYS_COLLAPSED -> false
+    }
+}
+
+@Serializable
 data class FolderRule(
     val id: String,
     val folderName: String,
@@ -160,5 +173,7 @@ data class ObtainmondSettings(
     val deleteApkAfterInstall: Boolean = true,
     val excludeDebugApks: Boolean = true,
     val showUpdateNotifications: Boolean = true,
-    val defaultIncludePrereleases: Boolean = false
+    val defaultIncludePrereleases: Boolean = false,
+    val releaseNotesExpansion: ReleaseNotesExpansion = ReleaseNotesExpansion.REMEMBER_LAST_STATE,
+    val lastReleaseNotesExpanded: Boolean = true
 )
