@@ -4,9 +4,9 @@ import android.os.Build
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -19,6 +19,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -79,7 +81,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.FilledTonalToggleButton
 import androidx.compose.material3.rememberModalBottomSheetState
-import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -96,6 +97,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -113,7 +115,6 @@ import io.obtainmond.privilege.PrivilegeManager
 import io.obtainmond.privilege.PrivilegeStatus
 import io.obtainmond.ui.compose.ExpressiveAppAvatar
 import io.obtainmond.ui.compose.ExpressiveButton
-import io.obtainmond.ui.compose.ExpressivePulsingDot
 import io.obtainmond.ui.compose.ExpressiveShapeBadge
 import io.obtainmond.ui.compose.ExpressiveTonalButton
 import io.obtainmond.ui.compose.categoryAccentColor
@@ -247,9 +248,9 @@ fun AppsDashboardScreen(
             start = 16.dp,
             end = 16.dp,
             top = 12.dp,
-            bottom = bottomPadding + 104.dp
+            bottom = bottomPadding + 16.dp
         ),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         item {
             if (selectedAppIds.isNotEmpty()) {
@@ -265,10 +266,10 @@ fun AppsDashboardScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         IconButton(onClick = onClearSelection) {
-                            Icon(Icons.Rounded.Close, contentDescription = "Cancel selection")
+                            Icon(Icons.Rounded.Close, contentDescription = stringResource(R.string.apps_cancel_selection))
                         }
                         Text(
-                            text = "${selectedAppIds.size} selected",
+                            text = stringResource(R.string.apps_selection_count, selectedAppIds.size),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.ExtraBold,
                             color = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -277,70 +278,24 @@ fun AppsDashboardScreen(
                         IconButton(
                             onClick = { onSelectAll(filteredAndSorted.map { it.id }) }
                         ) {
-                            Icon(Icons.Rounded.SelectAll, contentDescription = "Select all")
+                            Icon(Icons.Rounded.SelectAll, contentDescription = stringResource(R.string.apps_select_all))
                         }
                     }
                 }
             } else {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Text(
                             text = stringResource(R.string.tab_apps),
                             style = MaterialTheme.typography.headlineLarge,
-                            fontWeight = FontWeight.Black,
-                            letterSpacing = (-0.5).sp
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.weight(1f)
                         )
-                        Spacer(Modifier.height(4.dp))
-                        Surface(
-                            onClick = { showPrivilegeSheet = true },
-                            shape = CircleShape,
-                            color = if (privStatus.hasPrivilegedShell) {
-                                MaterialTheme.colorScheme.secondaryContainer
-                            } else {
-                                MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.7f)
-                            }
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                ExpressivePulsingDot(
-                                    color = if (privStatus.hasPrivilegedShell) {
-                                        MaterialTheme.colorScheme.primary
-                                    } else {
-                                        MaterialTheme.colorScheme.error
-                                    },
-                                    active = privStatus.hasPrivilegedShell
-                                )
-                                Spacer(Modifier.width(7.dp))
-                                Text(
-                                    text = privStatus.activeBackendLabel,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.SemiBold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        }
-                    }
-
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        ExpressiveTonalButton(
-                            onClick = { showBulkImportSheet = true },
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Upload,
-                                contentDescription = stringResource(R.string.action_bulk_import),
-                                modifier = Modifier.size(18.dp)
-                            )
+                        IconButton(onClick = { showBulkImportSheet = true }) {
+                            Icon(Icons.Rounded.Upload, stringResource(R.string.action_bulk_import))
                         }
                         FilledTonalToggleButton(
                             checked = settings.groupByCategory,
@@ -348,25 +303,45 @@ fun AppsDashboardScreen(
                                 AppRepository.updateSettings { it.copy(groupByCategory = enabled) }
                             }
                         ) {
-                            Icon(
-                                imageVector = Icons.Rounded.FolderCopy,
-                                contentDescription = "Group by folder or category",
-                                modifier = Modifier.size(18.dp)
-                            )
+                            Icon(Icons.Rounded.FolderCopy, stringResource(R.string.apps_group_by_folder))
                         }
-                        ExpressiveTonalButton(
-                            onClick = { showFilterSheet = true },
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp)
+                        IconButton(onClick = { showFilterSheet = true }) {
+                            val description = if (activeFilterCount > 0) {
+                                stringResource(R.string.apps_active_filters, activeFilterCount)
+                            } else {
+                                stringResource(R.string.apps_filter_sort)
+                            }
+                            Icon(Icons.Rounded.FilterList, description)
+                        }
+                    }
+                    Surface(
+                        onClick = { showPrivilegeSheet = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = MaterialTheme.shapes.large,
+                        color = MaterialTheme.colorScheme.surfaceContainer
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
+                            val statusColor = if (privStatus.hasPrivilegedShell || privStatus.hasDhizuku) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            }
                             Icon(
-                                imageVector = Icons.Rounded.FilterList,
-                                contentDescription = "Filter and sort",
+                                Icons.Rounded.Security,
+                                contentDescription = null,
+                                tint = statusColor,
                                 modifier = Modifier.size(18.dp)
                             )
-                            if (activeFilterCount > 0) {
-                                Spacer(Modifier.width(4.dp))
-                                Text(activeFilterCount.toString())
-                            }
+                            Text(
+                                text = privStatus.activeBackendLabel,
+                                style = MaterialTheme.typography.labelLarge,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Icon(Icons.Rounded.ExpandMore, contentDescription = null, modifier = Modifier.size(18.dp))
                         }
                     }
                 }
@@ -377,7 +352,7 @@ fun AppsDashboardScreen(
             OutlinedTextField(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
-                placeholder = { Text("Search apps...") },
+                placeholder = { Text(stringResource(R.string.apps_search)) },
                 leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
                 trailingIcon = {
                     AnimatedVisibility(
@@ -386,7 +361,7 @@ fun AppsDashboardScreen(
                         exit = scaleOut() + fadeOut()
                     ) {
                         IconButton(onClick = { searchQuery = "" }) {
-                            Icon(Icons.Rounded.Close, contentDescription = "Clear")
+                            Icon(Icons.Rounded.Close, contentDescription = stringResource(R.string.apps_clear_search))
                         }
                     }
                 },
@@ -395,7 +370,7 @@ fun AppsDashboardScreen(
                 colors = OutlinedTextFieldDefaults.colors(
                     unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
                     focusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
-                    unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
+                    unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant
                 ),
                 modifier = Modifier.fillMaxWidth()
             )
@@ -407,11 +382,11 @@ fun AppsDashboardScreen(
                     LinearWavyProgressIndicator(
                         modifier = Modifier.fillMaxWidth(),
                         color = MaterialTheme.colorScheme.primary,
-                        trackColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+                        trackColor = MaterialTheme.colorScheme.primaryContainer
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        text = "Checking for updates...",
+                        text = stringResource(R.string.apps_checking),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary,
                         fontWeight = FontWeight.SemiBold
@@ -438,21 +413,15 @@ fun AppsDashboardScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.weight(1f)
                         ) {
-                            ExpressiveShapeBadge(
-                                polygon = MaterialShapes.Sunny,
-                                containerColor = MaterialTheme.colorScheme.tertiary,
-                                contentColor = MaterialTheme.colorScheme.onTertiary,
-                                size = 32.dp
-                            ) {
-                                Text(
-                                    text = updatesReadyCount.toString(),
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = FontWeight.ExtraBold
-                                )
-                            }
+                            Icon(
+                                Icons.Rounded.Download,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                                modifier = Modifier.size(20.dp)
+                            )
                             Spacer(Modifier.width(10.dp))
                             Text(
-                                text = "$updatesReadyCount update(s) ready",
+                                text = pluralStringResource(R.plurals.apps_updates_ready, updatesReadyCount, updatesReadyCount),
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onTertiaryContainer
@@ -464,7 +433,7 @@ fun AppsDashboardScreen(
                         ) {
                             Icon(Icons.Rounded.Download, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text("Update All")
+                            Text(stringResource(R.string.action_update_all))
                         }
                     }
                 }
@@ -542,7 +511,7 @@ fun AppsDashboardScreen(
                             Box(
                                 modifier = Modifier
                                     .size(10.dp)
-                                    .clip(MaterialShapes.Cookie4Sided.toShape())
+                                    .clip(CircleShape)
                                     .background(catColor)
                             )
                         },
@@ -567,7 +536,7 @@ fun AppsDashboardScreen(
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         ExpressiveShapeBadge(
-                            polygon = MaterialShapes.Flower,
+                            polygon = remember { MaterialShapes.Flower },
                             containerColor = MaterialTheme.colorScheme.primaryContainer,
                             contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
                             size = 72.dp
@@ -622,9 +591,11 @@ fun AppsDashboardScreen(
                     )
                 }
                 if (!isCollapsed) {
-                    itemsIndexed(catApps, key = { _, app -> "${categoryName}_${app.id}_${app.url}" }) { _, app ->
+                    itemsIndexed(catApps, key = { _, app -> "${categoryName}_${app.id}_${app.url}" }) { index, app ->
                         ObtainiumAppRow(
                             app = app,
+                            topCorner = if (index == 0) 24.dp else 8.dp,
+                            bottomCorner = if (index == catApps.lastIndex) 24.dp else 8.dp,
                             isBusy = app.id in busyIds,
                             isSelected = app.id in selectedAppIds,
                             selectionActive = selectedAppIds.isNotEmpty(),
@@ -995,7 +966,9 @@ fun AppsDashboardScreen(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     ExpressiveShapeBadge(
-                        polygon = if (privStatus.hasPrivilegedShell) MaterialShapes.Cookie7Sided else MaterialShapes.Diamond,
+                        polygon = remember(privStatus.hasPrivilegedShell) {
+                            if (privStatus.hasPrivilegedShell) MaterialShapes.Cookie7Sided else MaterialShapes.Diamond
+                        },
                         containerColor = if (privStatus.hasPrivilegedShell) {
                             MaterialTheme.colorScheme.primaryContainer
                         } else {
@@ -1101,13 +1074,13 @@ private fun CategorySectionHeader(
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
             .clickable(onClick = onToggle)
-            .padding(horizontal = 6.dp, vertical = 8.dp),
+            .padding(horizontal = 8.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
             modifier = Modifier
-                .size(12.dp)
-                .clip(MaterialShapes.Cookie6Sided.toShape())
+                .size(width = 4.dp, height = 20.dp)
+                .clip(CircleShape)
                 .background(accentColor)
         )
         Spacer(Modifier.width(10.dp))
@@ -1146,6 +1119,8 @@ private fun ObtainiumAppRow(
     isBusy: Boolean,
     isSelected: Boolean,
     selectionActive: Boolean,
+    topCorner: Dp = 20.dp,
+    bottomCorner: Dp = 20.dp,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     onQuickAction: () -> Unit
@@ -1156,26 +1131,37 @@ private fun ObtainiumAppRow(
         if (app.hasUpdate) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
     )
 
+    val colors = MaterialTheme.colorScheme
     val containerColor by animateColorAsState(
         targetValue = when {
-            isSelected -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f)
-            app.needsAttention -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.36f)
-            app.hasUpdate -> MaterialTheme.colorScheme.surfaceContainer
-            else -> MaterialTheme.colorScheme.surfaceContainerLow
+            isSelected -> colors.primaryContainer
+            app.needsAttention -> colors.errorContainer
+            app.hasUpdate -> colors.surfaceContainerHigh
+            else -> colors.surfaceContainerLow
         },
         label = "appRowBg"
     )
-
-    val cornerRadius = if (isSelected) 28.dp else 20.dp
+    val contentColor = when {
+        isSelected -> colors.onPrimaryContainer
+        app.needsAttention -> colors.onErrorContainer
+        else -> colors.onSurface
+    }
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val top by animateDpAsState(if (pressed) 28.dp else topCorner, spring(), label = "rowTop")
+    val bottom by animateDpAsState(if (pressed) 28.dp else bottomCorner, spring(), label = "rowBottom")
+    val shape = RoundedCornerShape(topStart = top, topEnd = top, bottomStart = bottom, bottomEnd = bottom)
 
     Surface(
-        shape = RoundedCornerShape(cornerRadius),
+        shape = shape,
         color = containerColor,
+        contentColor = contentColor,
         modifier = Modifier
             .fillMaxWidth()
-            .animateContentSize()
-            .clip(RoundedCornerShape(cornerRadius))
+            .clip(shape)
             .combinedClickable(
+                interactionSource = interactionSource,
+                indication = androidx.compose.foundation.LocalIndication.current,
                 onClick = onClick,
                 onLongClick = {
                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -1186,9 +1172,11 @@ private fun ObtainiumAppRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 12.dp),
+                .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            Box(Modifier.size(width = 4.dp, height = 32.dp).clip(CircleShape).background(categoryColor))
+            Spacer(Modifier.width(8.dp))
             ExpressiveAppAvatar(
                 packageId = app.id,
                 appName = app.name,
@@ -1209,8 +1197,8 @@ private fun ObtainiumAppRow(
                     if (app.pinned) {
                         Icon(
                             imageVector = Icons.Rounded.PushPin,
-                            contentDescription = "Pinned",
-                            tint = MaterialTheme.colorScheme.primary,
+                            contentDescription = stringResource(R.string.apps_pinned),
+                            tint = contentColor,
                             modifier = Modifier.size(14.dp)
                         )
                     }
@@ -1237,27 +1225,26 @@ private fun ObtainiumAppRow(
                 }
 
                 Spacer(Modifier.height(3.dp))
-                val instVer = app.installedVersion.ifBlank { "Not installed" }
-                val remVer = app.latestVersion.ifBlank { "Unchecked" }
+                val instVer = app.installedVersion.ifBlank { stringResource(R.string.apps_not_installed) }
                 val versionLine = when {
-                    app.installedVersion.isBlank() && app.latestVersion.isNotBlank() -> "Latest: $remVer"
-                    app.hasUpdate -> "$instVer → $remVer"
-                    app.installedVersion.isNotBlank() -> "v$instVer"
+                    app.installedVersion.isBlank() && app.latestVersion.isNotBlank() ->
+                        stringResource(R.string.apps_latest_version, app.latestVersion)
+                    app.hasUpdate -> stringResource(R.string.apps_version_change, instVer, app.latestVersion)
                     else -> instVer
                 }
                 Text(
-                    text = "$versionLine  •  ${app.matchedAbi.ifBlank { app.installedAbi.ifBlank { "auto" } }}",
+                    text = versionLine,
                     style = MaterialTheme.typography.bodySmall,
                     fontFamily = FontFamily.Monospace,
-                    color = if (app.hasUpdate) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (app.hasUpdate && !isSelected && !app.needsAttention) colors.primary else contentColor,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
                 if (app.needsAttention) {
                     Text(
-                        text = "${app.errorCategory.ifBlank { "Attention" }}: ${app.lastError}",
+                        text = app.lastError.ifBlank { stringResource(R.string.label_needs_attention) },
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.error,
+                        color = contentColor,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -1269,7 +1256,7 @@ private fun ObtainiumAppRow(
                 when {
                     isBusy -> {
                         Text(
-                            text = "Busy",
+                            text = stringResource(R.string.apps_busy),
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.primary
@@ -1279,7 +1266,7 @@ private fun ObtainiumAppRow(
                         Icon(
                             imageVector = Icons.Rounded.WarningAmber,
                             contentDescription = stringResource(R.string.label_needs_attention),
-                            tint = MaterialTheme.colorScheme.error,
+                            tint = contentColor,
                             modifier = Modifier.size(22.dp)
                         )
                     }
@@ -1289,7 +1276,7 @@ private fun ObtainiumAppRow(
                             color = MaterialTheme.colorScheme.surfaceContainerHighest
                         ) {
                             Text(
-                                text = "Track",
+                                text = stringResource(R.string.apps_tracking),
                                 style = MaterialTheme.typography.labelSmall,
                                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                             )
@@ -1315,7 +1302,7 @@ private fun ObtainiumAppRow(
                             Icon(Icons.Rounded.Download, contentDescription = null, modifier = Modifier.size(15.dp))
                             Spacer(Modifier.width(4.dp))
                             Text(
-                                text = if (app.installedVersion.isBlank()) "Get" else "Update",
+                                text = stringResource(if (app.installedVersion.isBlank()) R.string.apps_install else R.string.apps_update),
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.Bold
                             )
@@ -1324,8 +1311,8 @@ private fun ObtainiumAppRow(
                     else -> {
                         Icon(
                             imageVector = Icons.Rounded.CheckCircle,
-                            contentDescription = "Up to date",
-                            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.78f),
+                            contentDescription = stringResource(R.string.apps_up_to_date),
+                            tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(20.dp)
                         )
                     }

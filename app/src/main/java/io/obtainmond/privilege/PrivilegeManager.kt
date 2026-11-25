@@ -20,23 +20,27 @@ import com.rosan.dhizuku.api.DhizukuRequestPermissionListener
 import io.obtainmond.R
 import io.obtainmond.data.model.ObtainmondSettings
 import io.obtainmond.data.model.PrivilegeBackendMode
-import io.obtainmond.rust.ObtainmondNative
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import rikka.shizuku.Shizuku
 import java.io.File
+import kotlin.coroutines.resume
 import java.nio.file.Files
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 data class PrivilegeStatus(
     val sheveryBinderAlive: Boolean = false,
@@ -67,6 +71,9 @@ data class ShellExecOutcome(
 ) {
     val isSuccess: Boolean
         get() = !installPending && exitCode == 0 && !stdout.contains("Failure [", ignoreCase = true)
+
+    internal val isInstallSuccess: Boolean
+        get() = isSuccess && stderr.isBlank() && stdout.trim() == "Success"
 }
 
 object PrivilegeManager {
@@ -310,18 +317,7 @@ object PrivilegeManager {
         // 2. Secondary Path: Shizuku Compatibility API
         if (tryShizuku && current.shizukuBinderAlive && current.shizukuGranted) {
             val shizukuOutcome = runCatching {
-                val newProcessMethod = Shizuku::class.java.getDeclaredMethod(
-                    "newProcess",
-                    Array<String>::class.java,
-                    Array<String>::class.java,
-                    String::class.java
-                ).apply { isAccessible = true }
-                val proc = newProcessMethod.invoke(
-                    null,
-                    arrayOf("sh", "-c", command),
-                    null,
-                    null
-                ) as Process
+                val proc = startShizukuProcess(command)
                 val out = proc.inputStream.bufferedReader().use { it.readText() }
                 val err = proc.errorStream.bufferedReader().use { it.readText() }
                 val code = proc.waitFor()
@@ -583,12 +579,8 @@ object PrivilegeManager {
             settings.privilegeMode == PrivilegeBackendMode.ROOT
 
         if (allowShell) {
-            val shellOutcome = if (validApks.size == 1) {
-                installSingleApkViaShell(validApks.first(), safeTargetPkg, settings, allowDowngrade)
-            } else {
-                installSplitApksViaShell(validApks, safeTargetPkg, settings, allowDowngrade)
-            }
-            if (shellOutcome.isSuccess && shellOutcome.stdout.contains("Success", ignoreCase = true)) {
+            val shellOutcome = installApksViaShell(context, validApks, safeTargetPkg, settings, allowDowngrade)
+            if (shellOutcome.isInstallSuccess) {
                 return@withContext shellOutcome
             }
             if (settings.privilegeMode == PrivilegeBackendMode.SHEVERY ||
@@ -641,81 +633,144 @@ object PrivilegeManager {
         )
     }
 
-    private suspend fun installSingleApkViaShell(
-        apkFile: File,
-        safeTargetPkg: String,
-        settings: ObtainmondSettings,
-        allowDowngrade: Boolean
-    ): ShellExecOutcome {
-        val stagePath = "/data/local/tmp/obtainmond_${System.currentTimeMillis()}.apk"
-        val dexoptTarget = if (settings.labPostInstallDexoptSpeedProfile) safeTargetPkg else ""
-        val installCmd = ObtainmondNative.buildInstallShellCmd(
-            apkPath = stagePath,
-            installerPackage = settings.installerSpoofPreset.packageId,
-            allowDowngrade = allowDowngrade,
-            grantRuntimePermissions = settings.autoGrantRuntimePermissions,
-            targetPackageForDexopt = dexoptTarget
-        )
-        val fullScript = buildString {
-            append("cp ${shellQuote(apkFile.absolutePath)} ${shellQuote(stagePath)} && ")
-            append("chmod 644 ${shellQuote(stagePath)} && ")
-            append(installCmd)
-            append(" ; EXIT_CODE=\$? ; rm -f ${shellQuote(stagePath)} ; exit \$EXIT_CODE")
-        }
-        return execPrivilegedShell(
-            command = fullScript,
-            preferredMode = settings.privilegeMode,
-            timeoutMs = 180_000L
-        )
+    private fun startShizukuProcess(command: String): Process {
+        val method = Shizuku::class.java.getDeclaredMethod(
+            "newProcess", Array<String>::class.java, Array<String>::class.java, String::class.java
+        ).apply { isAccessible = true }
+        return method.invoke(null, arrayOf("sh", "-c", command), null, null) as Process
     }
 
-    private suspend fun installSplitApksViaShell(
+    private class InstallShell(val label: String, val start: (String) -> Process)
+
+    private suspend fun runInstallCommand(
+        shell: InstallShell,
+        command: String,
+        failureMessage: String,
+        apk: File? = null,
+        timeoutMs: Long = 90_000L
+    ): ShellExecOutcome {
+        return withTimeoutOrNull(timeoutMs) {
+            suspendCancellableCoroutine { continuation ->
+                val process = AtomicReference<Process>()
+                val worker = scope.launch {
+                    val outcome = try {
+                        // Merge stderr before draining the process output. Keep the APK in app-private storage.
+                        val proc = shell.start("exec $command 2>&1")
+                        process.set(proc)
+                        ensureActive()
+                        val transferred = if (apk == null) {
+                            true
+                        } else {
+                            val expectedBytes = apk.length()
+                            apk.inputStream().use { input ->
+                                proc.outputStream.use { output ->
+                                    input.copyTo(output, bufferSize = 64 * 1024) == expectedBytes
+                                }
+                            }
+                        }
+                        val output = proc.inputStream.bufferedReader().use { it.readText().trim() }
+                        ShellExecOutcome(if (transferred) proc.waitFor() else -1, output, "", shell.label)
+                    } catch (e: Exception) {
+                        ShellExecOutcome(-1, "", e.message ?: failureMessage, shell.label)
+                    } finally {
+                        process.getAndSet(null)?.let { runCatching { it.destroy() } }
+                    }
+                    continuation.resume(outcome)
+                }
+                continuation.invokeOnCancellation {
+                    worker.cancel()
+                    process.getAndSet(null)?.let { running ->
+                        scope.launch { runCatching { running.destroy() } }
+                    }
+                }
+            }
+        } ?: ShellExecOutcome(-1, "", failureMessage, shell.label)
+    }
+
+    private suspend fun installApksViaShell(
+        context: Context,
         apkFiles: List<File>,
         safeTargetPkg: String,
         settings: ObtainmondSettings,
         allowDowngrade: Boolean
     ): ShellExecOutcome {
-        val stageDir = "/data/local/tmp/obtainmond_split_${System.currentTimeMillis()}"
-        val totalBytes = apkFiles.sumOf { it.length() }
+        refreshStatusSuspend(connectShevery = true)
+        val current = _status.value
+        val mode = settings.privilegeMode
+        val shells = buildList {
+            if ((mode == PrivilegeBackendMode.AUTO || mode == PrivilegeBackendMode.SHEVERY) &&
+                current.sheveryBinderAlive && current.sheveryGranted
+            ) {
+                add(InstallShell("Shevery RemoteProcess") { command ->
+                    SheveryPrivilege.newProcess(arrayOf("sh", "-c", command), null, null)
+                })
+            }
+            if ((mode == PrivilegeBackendMode.AUTO || mode == PrivilegeBackendMode.SHIZUKU) &&
+                current.shizukuBinderAlive && current.shizukuGranted
+            ) {
+                add(InstallShell("Shizuku Binder", ::startShizukuProcess))
+            }
+            if (mode == PrivilegeBackendMode.AUTO || mode == PrivilegeBackendMode.ROOT) {
+                add(InstallShell("Root (su)") { command -> ProcessBuilder("su", "-c", command).start() })
+            }
+        }
+
+        val failureMessage = context.getString(R.string.package_install_failed)
         val flags = buildList {
             add("-r")
             if (allowDowngrade) add("-d")
             if (settings.autoGrantRuntimePermissions) add("-g")
             val spoof = settings.installerSpoofPreset.packageId
-            if (spoof.isNotBlank() && VALID_PACKAGE_REGEX.matches(spoof)) {
+            if (VALID_PACKAGE_REGEX.matches(spoof)) {
                 add("-i")
                 add(shellQuote(spoof))
             }
             add("-S")
-            add(totalBytes.toString())
+            add(apkFiles.sumOf { it.length() }.toString())
         }.joinToString(" ")
 
-        val fullScript = buildString {
-            append("mkdir -p ${shellQuote(stageDir)} && ")
-            apkFiles.forEachIndexed { idx, file ->
-                val staged = "$stageDir/split_${idx}.apk"
-                append("cp ${shellQuote(file.absolutePath)} ${shellQuote(staged)} && chmod 644 ${shellQuote(staged)} && ")
+        // Sessions belong to the UID that creates them, so use one backend for all session commands.
+        val sessionPattern = Regex("""^Success: created install session \[(\d+)\]$""")
+        var lastOutcome = ShellExecOutcome(-1, "", failureMessage, "Package Installer")
+        for (shell in shells) {
+            val create = runInstallCommand(shell, "cmd package install-create $flags", failureMessage)
+            val sessionId = sessionPattern.matchEntire(create.stdout)?.groupValues?.get(1)?.toIntOrNull()
+            if (!create.isSuccess || sessionId == null) {
+                lastOutcome = create.copy(exitCode = -1, stderr = create.stderr.ifBlank { create.stdout.ifBlank { failureMessage } })
+                continue
             }
-            append("SESSION_OUT=\$(pm install-create $flags 2>&1) ; ")
-            append("CREATE_EXIT=\$? ; if [ \$CREATE_EXIT -ne 0 ]; then echo \"\$SESSION_OUT\"; rm -rf ${shellQuote(stageDir)}; exit \$CREATE_EXIT; fi ; ")
-            append("SID=\$(echo \"\$SESSION_OUT\" | sed -n 's/.*\\[\\([0-9]*\\)\\].*/\\1/p' | head -n1) ; ")
-            append("if [ -z \"\$SID\" ]; then echo \"\$SESSION_OUT\"; rm -rf ${shellQuote(stageDir)}; exit 1; fi ; ")
-            apkFiles.forEachIndexed { idx, file ->
-                val staged = "$stageDir/split_${idx}.apk"
-                append("pm install-write -S ${file.length()} \"\$SID\" split_${idx}.apk ${shellQuote(staged)} || { pm install-abandon \"\$SID\"; rm -rf ${shellQuote(stageDir)}; exit 1; } ; ")
-            }
-            append("COMMIT_OUT=\$(pm install-commit \"\$SID\" 2>&1) ; EXIT_CODE=\$? ; echo \"\$COMMIT_OUT\" ; ")
-            if (settings.labPostInstallDexoptSpeedProfile && safeTargetPkg.isNotBlank()) {
-                append("if [ \$EXIT_CODE -eq 0 ]; then cmd package compile -m speed-profile -f ${shellQuote(safeTargetPkg)} >/dev/null 2>&1 || true; fi ; ")
-            }
-            append("rm -rf ${shellQuote(stageDir)} ; exit \$EXIT_CODE")
-        }
 
-        return execPrivilegedShell(
-            command = fullScript,
-            preferredMode = settings.privilegeMode,
-            timeoutMs = 240_000L
-        )
+            var committed = false
+            try {
+                apkFiles.forEachIndexed { index, apk ->
+                    val name = if (index == 0) "base.apk" else "split_$index.apk"
+                    val bytes = apk.length()
+                    val write = runInstallCommand(
+                        shell, "cmd package install-write -S $bytes $sessionId $name -",
+                        failureMessage, apk, timeoutMs = 240_000L
+                    )
+                    if (!write.isSuccess || write.stdout != "Success: streamed $bytes bytes") {
+                        return write.copy(exitCode = -1, stderr = write.stderr.ifBlank { write.stdout.ifBlank { failureMessage } })
+                    }
+                }
+                val result = runInstallCommand(shell, "cmd package install-commit $sessionId", failureMessage, timeoutMs = 240_000L)
+                if (!result.isInstallSuccess) {
+                    return result.copy(exitCode = -1, stderr = result.stderr.ifBlank { result.stdout.ifBlank { failureMessage } })
+                }
+                committed = true
+                if (settings.labPostInstallDexoptSpeedProfile && safeTargetPkg.isNotBlank()) {
+                    runInstallCommand(shell, "cmd package compile -m speed-profile -f ${shellQuote(safeTargetPkg)}", failureMessage)
+                }
+                return result
+            } finally {
+                if (!committed) {
+                    withContext(NonCancellable) {
+                        runInstallCommand(shell, "cmd package install-abandon $sessionId", failureMessage, timeoutMs = 10_000L)
+                    }
+                }
+            }
+        }
+        return lastOutcome
     }
 
     private suspend fun stageObbEntries(

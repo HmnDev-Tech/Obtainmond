@@ -18,6 +18,8 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -72,7 +74,6 @@ import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearWavyProgressIndicator
-import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -81,7 +82,6 @@ import androidx.compose.material3.SplitButtonLayout
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -91,6 +91,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
@@ -104,7 +105,6 @@ import io.obtainmond.data.model.ObtainmondSettings
 import io.obtainmond.data.model.TrackedApp
 import io.obtainmond.data.repo.AppRepository
 import io.obtainmond.ui.compose.ExpressiveAppAvatar
-import io.obtainmond.ui.compose.ExpressiveShapeBadge
 import io.obtainmond.ui.compose.ExpressiveTonalButton
 import io.obtainmond.ui.compose.NavigationSettingsRow
 import io.obtainmond.ui.compose.ReleaseNotes
@@ -224,12 +224,8 @@ fun AppDetailScreen(
 
             item {
                 Surface(
-                    shape = RoundedCornerShape(32.dp),
-                    color = if (app.hasUpdate) {
-                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
-                    } else {
-                        MaterialTheme.colorScheme.surfaceContainerLow
-                    },
+                    shape = MaterialTheme.shapes.extraLarge,
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(modifier = Modifier.padding(20.dp)) {
@@ -241,7 +237,7 @@ fun AppDetailScreen(
                                 isSelected = false,
                                 isFrozen = app.isFrozen,
                                 isBusy = isBusy,
-                                size = 76.dp
+                                size = 56.dp
                             )
                             Spacer(Modifier.width(16.dp))
                             Column(modifier = Modifier.weight(1f)) {
@@ -360,7 +356,7 @@ fun AppDetailScreen(
                                         Box(
                                             modifier = Modifier
                                                 .size(8.dp)
-                                                .clip(MaterialShapes.Cookie6Sided.toShape())
+                                                .clip(CircleShape)
                                                 .background(c)
                                         )
                                         Spacer(Modifier.width(6.dp))
@@ -384,7 +380,7 @@ fun AppDetailScreen(
                             )
                             Spacer(Modifier.height(8.dp))
                             Text(
-                                text = "Updating...",
+                                text = stringResource(R.string.apps_busy),
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.primary,
                                 fontWeight = FontWeight.SemiBold
@@ -440,9 +436,9 @@ fun AppDetailScreen(
                                                 Spacer(Modifier.width(8.dp))
                                                 Text(
                                                     text = when {
-                                                        app.installedVersion.isBlank() -> "Install"
-                                                        app.hasUpdate -> "Update to ${app.latestVersion}"
-                                                        else -> "Check Release"
+                                                        app.installedVersion.isBlank() -> stringResource(R.string.apps_install)
+                                                        app.hasUpdate -> stringResource(R.string.apps_update)
+                                                        else -> stringResource(R.string.apps_check_release)
                                                     },
                                                     maxLines = 1,
                                                     overflow = TextOverflow.Ellipsis
@@ -619,100 +615,24 @@ fun AppDetailScreen(
 
             item {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    Surface(
-                        shape = RoundedCornerShape(topStart = 26.dp, bottomStart = 26.dp, topEnd = 10.dp, bottomEnd = 10.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainer,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Column(modifier = Modifier.padding(14.dp)) {
-                            Text(
-                                text = "INSTALLED",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(Modifier.height(4.dp))
-                            Text(
-                                text = app.installedVersion.ifBlank { "Not installed" },
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.ExtraBold,
-                                fontFamily = FontFamily.Monospace,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = app.installedAbi.ifBlank { "auto ABI" },
-                                style = MaterialTheme.typography.labelSmall,
-                                fontFamily = FontFamily.Monospace,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-
-                    ExpressiveShapeBadge(
-                        polygon = if (app.hasUpdate) MaterialShapes.Sunny else MaterialShapes.Circle,
-                        containerColor = if (app.hasUpdate) {
-                            MaterialTheme.colorScheme.tertiaryContainer
-                        } else {
-                            MaterialTheme.colorScheme.secondaryContainer
-                        },
-                        contentColor = if (app.hasUpdate) {
-                            MaterialTheme.colorScheme.onTertiaryContainer
-                        } else {
-                            MaterialTheme.colorScheme.onSecondaryContainer
-                        },
-                        size = 38.dp
-                    ) {
-                        Icon(
-                            imageVector = if (app.hasUpdate) Icons.Rounded.Download else Icons.Rounded.CheckCircle,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-
-                    Surface(
-                        shape = RoundedCornerShape(topStart = 10.dp, bottomStart = 10.dp, topEnd = 26.dp, bottomEnd = 26.dp),
-                        color = if (app.hasUpdate) {
-                            MaterialTheme.colorScheme.primaryContainer
-                        } else {
-                            MaterialTheme.colorScheme.surfaceContainer
-                        },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Column(modifier = Modifier.padding(14.dp)) {
-                            Text(
-                                text = "LATEST RELEASE",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = if (app.hasUpdate) {
-                                    MaterialTheme.colorScheme.onPrimaryContainer
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                }
-                            )
-                            Spacer(Modifier.height(4.dp))
-                            Text(
-                                text = app.latestVersion.ifBlank { "Unchecked" },
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.ExtraBold,
-                                fontFamily = FontFamily.Monospace,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = app.matchedAbi.ifBlank { "pending" },
-                                style = MaterialTheme.typography.labelSmall,
-                                fontFamily = FontFamily.Monospace,
-                                color = if (app.hasUpdate) {
-                                    MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                }
-                            )
-                        }
-                    }
+                    ReleaseVersionPanel(
+                        label = stringResource(R.string.filter_installed),
+                        version = app.installedVersion.ifBlank { stringResource(R.string.apps_not_installed) },
+                        abi = app.installedAbi,
+                        modifier = Modifier.weight(1f).fillMaxHeight(),
+                        shape = RoundedCornerShape(topStart = 24.dp, bottomStart = 24.dp, topEnd = 4.dp, bottomEnd = 4.dp)
+                    )
+                    ReleaseVersionPanel(
+                        label = stringResource(R.string.apps_latest_release),
+                        version = app.latestVersion.ifBlank { stringResource(R.string.apps_unchecked) },
+                        abi = app.matchedAbi,
+                        highlighted = app.hasUpdate,
+                        modifier = Modifier.weight(1f).fillMaxHeight(),
+                        shape = RoundedCornerShape(topStart = 4.dp, bottomStart = 4.dp, topEnd = 24.dp, bottomEnd = 24.dp)
+                    )
                 }
             }
 
@@ -729,14 +649,11 @@ fun AppDetailScreen(
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                ExpressiveShapeBadge(
-                                    polygon = MaterialShapes.Gem,
-                                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                                    size = 34.dp
-                                ) {
-                                    Icon(Icons.Rounded.Bolt, contentDescription = null, modifier = Modifier.size(16.dp))
-                                }
+                                Icon(
+                                    Icons.Rounded.Bolt,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                                 Spacer(Modifier.width(10.dp))
                                 Column {
                                     Text(
@@ -920,7 +837,6 @@ fun AppDetailScreen(
                                 title = stringResource(R.string.label_on_demand_only),
                                 subtitle = stringResource(R.string.desc_on_demand_only),
                                 checked = app.onDemandOnly,
-                                shape = MaterialShapes.Circle,
                                 onCheckedChange = { enabled ->
                                     AppRepository.setOnDemandOnly(app.id, enabled)
                                 }
@@ -931,7 +847,6 @@ fun AppDetailScreen(
                                 icon = Icons.Rounded.Folder,
                                 title = "Folders",
                                 subtitle = app.folders.joinToString(", ").ifBlank { "No folder assigned" },
-                                shape = MaterialShapes.Square,
                                 onClick = { showFolderDialog = true }
                             )
                         },
@@ -941,7 +856,6 @@ fun AppDetailScreen(
                                 title = "Include Pre-releases",
                                 subtitle = "Track beta, alpha, and nightly releases",
                                 checked = app.includePrereleases,
-                                shape = MaterialShapes.Cookie4Sided,
                                 onCheckedChange = { enabled ->
                                     AppRepository.updateApp(app.id) { it.copy(includePrereleases = enabled) }
                                 }
@@ -953,7 +867,6 @@ fun AppDetailScreen(
                                 title = "Track Only",
                                 subtitle = "Show new versions without downloading or installing",
                                 checked = app.trackOnly,
-                                shape = MaterialShapes.Arch,
                                 onCheckedChange = { enabled ->
                                     AppRepository.updateApp(app.id) { it.copy(trackOnly = enabled) }
                                 }
@@ -965,7 +878,6 @@ fun AppDetailScreen(
                                 title = "Allow Downgrade (-d)",
                                 subtitle = "Permit installing older version codes",
                                 checked = app.allowDowngrade,
-                                shape = MaterialShapes.Diamond,
                                 onCheckedChange = { enabled ->
                                     AppRepository.updateApp(app.id) { it.copy(allowDowngrade = enabled) }
                                 }
@@ -1171,5 +1083,35 @@ fun AppDetailScreen(
                 }
             }
         )
+    }
+}
+
+
+@Composable
+private fun ReleaseVersionPanel(
+    label: String,
+    version: String,
+    abi: String,
+    modifier: Modifier,
+    shape: Shape,
+    highlighted: Boolean = false
+) {
+    val colors = MaterialTheme.colorScheme
+    Surface(
+        modifier = modifier,
+        shape = shape,
+        color = if (highlighted) colors.primaryContainer else colors.surfaceContainer,
+        contentColor = if (highlighted) colors.onPrimaryContainer else colors.onSurface
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(label, style = MaterialTheme.typography.labelMedium)
+            Text(version, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            if (abi.isNotBlank()) {
+                Text(abi, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+            }
+        }
     }
 }

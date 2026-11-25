@@ -2,6 +2,7 @@ package io.obtainmond.data.repo
 
 import io.obtainmond.data.model.FolderRule
 import io.obtainmond.data.model.TrackedApp
+import io.obtainmond.privilege.ShellExecOutcome
 import io.obtainmond.rust.SourceDescriptorDto
 import io.obtainmond.security.HttpFetchResponse
 import kotlinx.coroutines.delay
@@ -13,6 +14,46 @@ import org.junit.Test
 import java.util.concurrent.atomic.AtomicInteger
 
 class AppRepositoryLogicTest {
+
+    @Test
+    fun staleSuccessfulInstallMetadataDoesNotSuppressRetry() {
+        val download = "https://github.com/example/mpv/releases/download/v3.1.1/mpv.apk"
+        val stale = TrackedApp(
+            id = "org.example.mpv",
+            name = "mpv",
+            author = "example",
+            url = "https://github.com/example/mpv",
+            installedVersion = "3.1.1",
+            latestVersion = "3.1.1",
+            installedReleaseTag = "3.1.1",
+            installedApkUrl = download,
+            matchedApkUrl = download,
+            lastUpdatedEpochMs = 123,
+            lastSha256 = "stale",
+            pinnedSigningCertSha256 = "pin"
+        )
+        val reconciled = AppRepository.applyMatchedPackageState(
+            stale, stale.id, "3.0.2", "arm64-v8a", false, "pin"
+        )
+        assertEquals("3.0.2", reconciled.installedVersion)
+        assertEquals("", reconciled.installedReleaseTag)
+        assertEquals("", reconciled.installedApkUrl)
+        assertEquals(0L, reconciled.lastUpdatedEpochMs)
+        assertEquals("", reconciled.lastSha256)
+        assertEquals("pin", reconciled.pinnedSigningCertSha256)
+        assertTrue(reconciled.hasUpdate)
+    }
+
+    @Test
+    fun installSuccessRequiresExplicitConfirmation() {
+        val confirmed = ShellExecOutcome(0, "Success", "", "Shevery")
+        assertTrue(confirmed.isInstallSuccess)
+        assertFalse(confirmed.copy(stdout = "", stderr = "Permission denied").isInstallSuccess)
+        assertFalse(confirmed.copy(stdout = "Success: streamed 10 bytes").isInstallSuccess)
+        assertFalse(confirmed.copy(stdout = "Failure [INSTALL_FAILED_INVALID_APK]").isInstallSuccess)
+        assertFalse(confirmed.copy(exitCode = 1).isInstallSuccess)
+        assertFalse(confirmed.copy(installPending = true).isInstallSuccess)
+    }
 
     @Test
     fun strictPackageSyncNeverHijacksByDisplayNameAndFlagsPinMismatch() {

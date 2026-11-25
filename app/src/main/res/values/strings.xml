@@ -47,4 +47,30 @@
     <string name="msg_rollback_android7_hint">Note: Android 7+ restricts in-place downgrades of non-debuggable release APKs without a privileged ADB/Root shell.</string>
     <string name="msg_select_app_detail">Select an app from your library to inspect releases, changelog, and controls</string>
     <string name="title_supported_sources">Verified Release Sources</string>
+    <string name="package_install_version_unconfirmed">Android did not confirm the installed APK version. Check the app and retry the update.</string>
+    <string name="apps_group_by_folder">Group by folder or category</string>
+    <string name="apps_filter_sort">Filter and sort</string>
+    <string name="apps_active_filters">Filter and sort (%1$d active)</string>
+    <string name="apps_cancel_selection">Cancel selection</string>
+    <string name="apps_selection_count">%1$d selected</string>
+    <string name="apps_select_all">Select all</string>
+    <string name="apps_search">Search apps</string>
+    <string name="apps_clear_search">Clear search</string>
+    <string name="apps_check_release">Check release</string>
+    <string name="apps_checking">Checking for updates…</string>
+    <string name="apps_not_installed">Not installed</string>
+    <string name="apps_latest_release">Latest release</string>
+    <string name="apps_latest_version">Latest: %1$s</string>
+    <string name="apps_version_change">%1$s → %2$s</string>
+    <string name="apps_unchecked">Unchecked</string>
+    <string name="apps_pinned">Pinned</string>
+    <string name="apps_busy">Working…</string>
+    <string name="apps_tracking">Tracking</string>
+    <string name="apps_install">Install</string>
+    <string name="apps_update">Update</string>
+    <string name="apps_up_to_date">Up to date</string>
+    <plurals name="apps_updates_ready">
+        <item quantity="one">%d update ready</item>
+        <item quantity="other">%d updates ready</item>
+    </plurals>
 </resources>

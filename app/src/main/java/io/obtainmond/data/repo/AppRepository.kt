@@ -8,6 +8,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.util.AtomicFile
 import androidx.core.app.NotificationCompat
+import androidx.core.content.pm.PackageInfoCompat
 import io.obtainmond.R
 import io.obtainmond.data.model.AppEventLog
 import io.obtainmond.data.model.FolderRule
@@ -464,11 +465,15 @@ object AppRepository {
         val ver = versionName ?: app.installedVersion
         val normalizedVer = ObtainmondNative.safeNormalizeVersion(ver, app.versionExtractionRegex)
         val effectiveAbi = detectedAbi.ifEmpty { app.installedAbi }
+        val installedVersionChanged = versionName != null && app.installedVersion.isNotBlank() &&
+            !ObtainmondNative.areVersionsEquivalent(normalizedVer, app.installedVersion)
         val updatedTag = if (
             app.latestVersion.isNotBlank() &&
             ObtainmondNative.areVersionsEquivalent(normalizedVer, app.latestVersion)
         ) {
             app.latestVersion
+        } else if (installedVersionChanged) {
+            ""
         } else {
             app.installedReleaseTag
         }
@@ -487,6 +492,9 @@ object AppRepository {
             installedAbi = effectiveAbi,
             isFrozen = isSuspended,
             installedReleaseTag = updatedTag,
+            installedApkUrl = if (installedVersionChanged) "" else app.installedApkUrl,
+            lastUpdatedEpochMs = if (installedVersionChanged) 0L else app.lastUpdatedEpochMs,
+            lastSha256 = if (installedVersionChanged) "" else app.lastSha256,
             pinnedSigningCertSha256 = app.pinnedSigningCertSha256.ifBlank { installedCertSha256 },
             errorCategory = if (pinError != null) "SIGNATURE_MISMATCH" else app.errorCategory,
             lastError = pinError ?: app.lastError
@@ -507,7 +515,7 @@ object AppRepository {
                         @Suppress("DEPRECATION")
                         pm.getInstalledPackages(0)
                     }
-                }.getOrDefault(emptyList()).associateBy { it.packageName.lowercase() }
+                }.getOrNull()?.associateBy { it.packageName.lowercase() }
             }
             val updated = _apps.value.map { app ->
                 val directInfo = runCatching {
@@ -518,7 +526,7 @@ object AppRepository {
                         pm.getPackageInfo(app.id, 0)
                     }
                 }.getOrNull()
-                val pkgInfo = directInfo ?: installedByPkg[app.id.lowercase()]
+                val pkgInfo = directInfo ?: installedByPkg?.get(app.id.lowercase())
 
                 if (pkgInfo != null) {
                     val detectedAbi = detectInstalledPackageAbi(pkgInfo.applicationInfo?.nativeLibraryDir)
@@ -538,6 +546,16 @@ object AppRepository {
                         detectedAbi = detectedAbi,
                         isSuspended = suspended,
                         installedCertSha256 = installedCert
+                    )
+                } else if (installedByPkg != null && app.installedVersion.isNotBlank()) {
+                    app.copy(
+                        installedVersion = "",
+                        installedAbi = "",
+                        isFrozen = false,
+                        installedReleaseTag = "",
+                        installedApkUrl = "",
+                        lastUpdatedEpochMs = 0L,
+                        lastSha256 = ""
                     )
                 } else {
                     app
@@ -1317,15 +1335,34 @@ object AppRepository {
                 keepForInstaller = true
                 return@withContext false
             }
-            val succeeded = installOutcome.isSuccess
+            val reportedSuccess = installOutcome.isInstallSuccess
+            val installedVersionMatches = if (reportedSuccess && archiveInfo != null) {
+                runCatching {
+                    val packageManager = appContext.packageManager
+                    val installed = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        packageManager.getPackageInfo(realPackageId, PackageManager.PackageInfoFlags.of(0))
+                    } else {
+                        @Suppress("DEPRECATION")
+                        packageManager.getPackageInfo(realPackageId, 0)
+                    }
+                    PackageInfoCompat.getLongVersionCode(installed) == PackageInfoCompat.getLongVersionCode(archiveInfo)
+                }.getOrDefault(false)
+            } else {
+                false
+            }
+            val succeeded = reportedSuccess && installedVersionMatches
+            val installDetails = if (reportedSuccess && !installedVersionMatches) {
+                appContext.getString(R.string.package_install_version_unconfirmed)
+            } else {
+                installOutcome.stderr.ifBlank { installOutcome.stdout }
+                    .ifBlank { appContext.getString(R.string.package_install_failed) }
+            }
             appendLog(
                 appId = realPackageId,
                 appName = currentApp.name,
                 action = if (isBackground) "Background Silent Update" else "Silent Install",
                 backendUsed = installOutcome.backendUsed,
-                details = "${currentApp.matchedApkName} (${apkFilesToInstall.size} APK(s), ${primaryIntegrity.summary}) -> ${
-                    installOutcome.stdout.ifBlank { installOutcome.stderr }
-                }",
+                details = "${currentApp.matchedApkName} (${apkFilesToInstall.size} APK(s), ${primaryIntegrity.summary}) -> $installDetails",
                 success = succeeded
             )
 
@@ -1372,8 +1409,7 @@ object AppRepository {
                     )
                 }
             } else {
-                val errText = installOutcome.stderr.ifBlank { installOutcome.stdout }.ifBlank { "Install failed" }
-                markAppError(currentApp.id, "INSTALL_FAILED", errText)
+                markAppError(currentApp.id, "INSTALL_FAILED", installDetails)
             }
             succeeded
         } catch (e: Throwable) {
@@ -1427,12 +1463,12 @@ object AppRepository {
                 allowDowngrade = true
             )
             if (outcome.installPending) return@withContext null
-            val details = if (outcome.isSuccess) {
+            val details = if (outcome.isInstallSuccess) {
                 "Rolled back ${backupApks.size} APK(s) to v${app.backupVersion}: ${outcome.stdout}"
             } else {
                 PrivilegeManager.analyzeRollbackDowngradeFailure(appContext, app.id, outcome, currentSettings)
             }
-            if (!outcome.isSuccess) {
+            if (!outcome.isInstallSuccess) {
                 markAppError(app.id, "ROLLBACK_FAILED", details)
             } else {
                 clearAppError(app.id)
@@ -1443,10 +1479,10 @@ object AppRepository {
                 action = "Instant Rollback (-r -d)",
                 backendUsed = outcome.backendUsed,
                 details = details,
-                success = outcome.isSuccess
+                success = outcome.isInstallSuccess
             )
             syncInstalledPackagesState()
-            outcome.isSuccess
+            outcome.isInstallSuccess
         } finally {
             _busyAppIds.update { it - appId }
         }
