@@ -23,7 +23,7 @@ class AppRepositoryLogicTest {
             name = "mpv",
             author = "example",
             url = "https://github.com/example/mpv",
-            installedVersion = "3.1.1",
+            installedVersion = "3.0.2",
             latestVersion = "3.1.1",
             installedReleaseTag = "3.1.1",
             installedApkUrl = download,
@@ -42,6 +42,20 @@ class AppRepositoryLogicTest {
         assertEquals("", reconciled.lastSha256)
         assertEquals("pin", reconciled.pinnedSigningCertSha256)
         assertTrue(reconciled.hasUpdate)
+
+        val verified = stale.copy(installedReleaseVersionCode = 302)
+        val current = AppRepository.applyMatchedPackageState(
+            verified, verified.id, "3.0.2", "arm64-v8a", false, "pin", installedVersionCode = 302
+        )
+        assertEquals(download, current.installedApkUrl)
+        assertFalse(current.hasUpdate)
+
+        val replaced = AppRepository.applyMatchedPackageState(
+            verified, verified.id, "3.0.2", "arm64-v8a", false, "pin", installedVersionCode = 301
+        )
+        assertEquals("", replaced.installedApkUrl)
+        assertTrue(replaced.hasUpdate)
+
     }
 
     @Test

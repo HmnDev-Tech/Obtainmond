@@ -457,7 +457,8 @@ object AppRepository {
         versionName: String?,
         detectedAbi: String,
         isSuspended: Boolean,
-        installedCertSha256: String
+        installedCertSha256: String,
+        installedVersionCode: Long? = null
     ): TrackedApp {
         if (!matchedPackageId.equals(app.id, ignoreCase = true)) {
             return app
@@ -465,17 +466,23 @@ object AppRepository {
         val ver = versionName ?: app.installedVersion
         val normalizedVer = ObtainmondNative.safeNormalizeVersion(ver, app.versionExtractionRegex)
         val effectiveAbi = detectedAbi.ifEmpty { app.installedAbi }
-        val installedVersionChanged = versionName != null && app.installedVersion.isNotBlank() &&
-            !ObtainmondNative.areVersionsEquivalent(normalizedVer, app.installedVersion)
-        val updatedTag = if (
-            app.latestVersion.isNotBlank() &&
-            ObtainmondNative.areVersionsEquivalent(normalizedVer, app.latestVersion)
-        ) {
-            app.latestVersion
-        } else if (installedVersionChanged) {
-            ""
+        val verifiedVersionCode = app.installedReleaseVersionCode
+        val installedVersionChanged = if (verifiedVersionCode != null && installedVersionCode != null) {
+            verifiedVersionCode != installedVersionCode
         } else {
-            app.installedReleaseTag
+            versionName != null && app.installedVersion.isNotBlank() &&
+                !ObtainmondNative.areVersionsEquivalent(normalizedVer, app.installedVersion)
+        }
+        // Older builds already corrected the displayed version, but kept the stale release assignment.
+        val legacyClaimsLatest = verifiedVersionCode == null && versionName != null && (
+            ObtainmondNative.areVersionsEquivalent(app.installedReleaseTag, app.latestVersion) ||
+                (app.installedApkUrl.isNotBlank() && app.installedApkUrl == app.matchedApkUrl)
+            ) && ObtainmondNative.safeIsUpdateAvailable(normalizedVer, app.latestVersion)
+        val clearReleaseAssignment = installedVersionChanged || legacyClaimsLatest
+        val updatedTag = when {
+            ObtainmondNative.areVersionsEquivalent(normalizedVer, app.latestVersion) -> app.latestVersion
+            clearReleaseAssignment -> ""
+            else -> app.installedReleaseTag
         }
         val pinError = if (
             app.pinnedSigningCertSha256.isNotBlank() &&
@@ -492,9 +499,10 @@ object AppRepository {
             installedAbi = effectiveAbi,
             isFrozen = isSuspended,
             installedReleaseTag = updatedTag,
-            installedApkUrl = if (installedVersionChanged) "" else app.installedApkUrl,
-            lastUpdatedEpochMs = if (installedVersionChanged) 0L else app.lastUpdatedEpochMs,
-            lastSha256 = if (installedVersionChanged) "" else app.lastSha256,
+            installedApkUrl = if (clearReleaseAssignment) "" else app.installedApkUrl,
+            installedReleaseVersionCode = if (clearReleaseAssignment) null else verifiedVersionCode,
+            lastUpdatedEpochMs = if (clearReleaseAssignment) 0L else app.lastUpdatedEpochMs,
+            lastSha256 = if (clearReleaseAssignment) "" else app.lastSha256,
             pinnedSigningCertSha256 = app.pinnedSigningCertSha256.ifBlank { installedCertSha256 },
             errorCategory = if (pinError != null) "SIGNATURE_MISMATCH" else app.errorCategory,
             lastError = pinError ?: app.lastError
@@ -545,7 +553,8 @@ object AppRepository {
                         versionName = pkgInfo.versionName,
                         detectedAbi = detectedAbi,
                         isSuspended = suspended,
-                        installedCertSha256 = installedCert
+                        installedCertSha256 = installedCert,
+                        installedVersionCode = PackageInfoCompat.getLongVersionCode(pkgInfo)
                     )
                 } else if (installedByPkg != null && app.installedVersion.isNotBlank()) {
                     app.copy(
@@ -554,6 +563,7 @@ object AppRepository {
                         isFrozen = false,
                         installedReleaseTag = "",
                         installedApkUrl = "",
+                        installedReleaseVersionCode = null,
                         lastUpdatedEpochMs = 0L,
                         lastSha256 = ""
                     )
@@ -1336,7 +1346,8 @@ object AppRepository {
                 return@withContext false
             }
             val reportedSuccess = installOutcome.isInstallSuccess
-            val installedVersionMatches = if (reportedSuccess && archiveInfo != null) {
+            val archiveVersionCode = archiveInfo?.let { PackageInfoCompat.getLongVersionCode(it) }
+            val installedVersionMatches = if (reportedSuccess && archiveVersionCode != null) {
                 runCatching {
                     val packageManager = appContext.packageManager
                     val installed = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -1345,7 +1356,7 @@ object AppRepository {
                         @Suppress("DEPRECATION")
                         packageManager.getPackageInfo(realPackageId, 0)
                     }
-                    PackageInfoCompat.getLongVersionCode(installed) == PackageInfoCompat.getLongVersionCode(archiveInfo)
+                    PackageInfoCompat.getLongVersionCode(installed) == archiveVersionCode
                 }.getOrDefault(false)
             } else {
                 false
@@ -1381,6 +1392,7 @@ object AppRepository {
                                 lastSha256 = primaryIntegrity.sha256Hex,
                                 installedReleaseTag = releaseTag,
                                 installedApkUrl = rawDownloadUrl,
+                                installedReleaseVersionCode = archiveVersionCode,
                                 pinnedSigningCertSha256 = firstSigResult.primaryFingerprint.ifBlank { item.pinnedSigningCertSha256 },
                                 lastSupplyChainSummary = scResult.badgeSummary.ifBlank { item.lastSupplyChainSummary },
                                 skippedVersion = "",

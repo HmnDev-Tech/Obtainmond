@@ -87,7 +87,8 @@ data class TrackedApp(
     val pinnedSigningCertSha256: String = "",
     val lastError: String = "",
     val errorCategory: String = "",
-    val lastSupplyChainSummary: String = ""
+    val lastSupplyChainSummary: String = "",
+    val installedReleaseVersionCode: Long? = null
 ) {
     val needsAttention: Boolean
         get() = errorCategory.isNotBlank() || lastError.isNotBlank()
