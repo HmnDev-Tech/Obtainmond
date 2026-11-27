@@ -59,6 +59,14 @@ class AppRepositoryLogicTest {
     }
 
     @Test
+    fun duplicateBuildCheckUsesApkMetadataInsteadOfReleaseTag() {
+        assertTrue(AppRepository.matchesInstalledBuild("3.14.4", 199, "3.14.4", 199))
+        assertFalse(AppRepository.matchesInstalledBuild("3.14.4", 199, "3.14.4", 200))
+        assertFalse(AppRepository.matchesInstalledBuild("3.14.4", 199, "3.14.5", 199))
+        assertFalse(AppRepository.matchesInstalledBuild("3.14.4", 199, null, null))
+    }
+
+    @Test
     fun installSuccessRequiresExplicitConfirmation() {
         val confirmed = ShellExecOutcome(0, "Success", "", "Shevery")
         assertTrue(confirmed.isInstallSuccess)

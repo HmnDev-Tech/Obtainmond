@@ -526,15 +526,7 @@ object AppRepository {
                 }.getOrNull()?.associateBy { it.packageName.lowercase() }
             }
             val updated = _apps.value.map { app ->
-                val directInfo = runCatching {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                        pm.getPackageInfo(app.id, PackageManager.PackageInfoFlags.of(0L))
-                    } else {
-                        @Suppress("DEPRECATION")
-                        pm.getPackageInfo(app.id, 0)
-                    }
-                }.getOrNull()
-                val pkgInfo = directInfo ?: installedByPkg?.get(app.id.lowercase())
+                val pkgInfo = getInstalledPackageInfo(app.id) ?: installedByPkg?.get(app.id.lowercase())
 
                 if (pkgInfo != null) {
                     val detectedAbi = detectInstalledPackageAbi(pkgInfo.applicationInfo?.nativeLibraryDir)
@@ -575,6 +567,24 @@ object AppRepository {
             saveAppsToDisk(updated)
         }
     }
+
+    private fun getInstalledPackageInfo(packageId: String) = runCatching {
+        val pm = appContext.packageManager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            pm.getPackageInfo(packageId, PackageManager.PackageInfoFlags.of(0))
+        } else {
+            @Suppress("DEPRECATION")
+            pm.getPackageInfo(packageId, 0)
+        }
+    }.getOrNull()
+
+    internal fun matchesInstalledBuild(
+        installedVersion: String?,
+        installedVersionCode: Long,
+        archiveVersion: String?,
+        archiveVersionCode: Long?
+    ): Boolean = installedVersionCode == archiveVersionCode &&
+        !installedVersion.isNullOrBlank() && installedVersion == archiveVersion
 
     private fun detectInstalledPackageAbi(nativeLibDir: String?): String {
         if (nativeLibDir.isNullOrBlank()) return ""
@@ -639,7 +649,7 @@ object AppRepository {
             val latestSnapshot = _apps.value.firstOrNull { it.url == refreshed.url } ?: refreshed
             if (installImmediately && latestSnapshot.matchedApkUrl.isNotBlank() && !latestSnapshot.trackOnly) {
                 if (latestSnapshot.installedVersion.isBlank() || latestSnapshot.hasUpdate) {
-                    downloadAndInstallAppSilently(latestSnapshot.id, isBackground = false)
+                    downloadAndInstallAppSilently(latestSnapshot.id, onlyIfNeeded = true)
                 }
             }
             _apps.value.firstOrNull { it.url == refreshed.url } ?: latestSnapshot
@@ -725,7 +735,7 @@ object AppRepository {
         for (id in appIds) {
             val refreshed = checkSingleApp(id).getOrNull() ?: continue
             if ((refreshed.hasUpdate || refreshed.installedVersion.isBlank()) && refreshed.matchedApkUrl.isNotBlank()) {
-                if (downloadAndInstallAppSilently(refreshed.id, isBackground = false)) {
+                if (downloadAndInstallAppSilently(refreshed.id, onlyIfNeeded = true)) {
                     count++
                 }
             }
@@ -948,15 +958,6 @@ object AppRepository {
         }
 
         if (parsed.error != null) {
-            if (app.id == appContext.packageName && app.installedVersion.isNotBlank()) {
-                val normalizedInstalled = ObtainmondNative.safeNormalizeVersion(app.installedVersion)
-                return@withContext app.copy(
-                    latestVersion = normalizedInstalled,
-                    matchedAbi = app.installedAbi.ifBlank { "arm64-v8a" },
-                    lastCheckedEpochMs = System.currentTimeMillis(),
-                    installedReleaseTag = normalizedInstalled
-                )
-            }
             throw IllegalStateException(parsed.error)
         }
 
@@ -1053,7 +1054,7 @@ object AppRepository {
                     (!isBackgroundWorker || (app.silentAutoUpdate && !app.onDemandOnly))
             }
             for (app in candidates) {
-                val ok = downloadAndInstallAppSilently(app.id, isBackground = isBackgroundWorker)
+                val ok = downloadAndInstallAppSilently(app.id, isBackground = isBackgroundWorker, onlyIfNeeded = true)
                 if (ok) installedCount++
             }
         }
@@ -1096,7 +1097,8 @@ object AppRepository {
     suspend fun downloadAndInstallAppSilently(
         appId: String,
         overrideApkUrl: String? = null,
-        isBackground: Boolean = false
+        isBackground: Boolean = false,
+        onlyIfNeeded: Boolean = false
     ): Boolean = withContext(Dispatchers.IO) {
         val currentApp = _apps.value.firstOrNull { it.id == appId } ?: return@withContext false
         val rawUrlInput = (overrideApkUrl ?: currentApp.matchedApkUrl).trim()
@@ -1290,6 +1292,43 @@ object AppRepository {
                 }
             }
 
+            val archiveVersionCode = archiveInfo?.let { PackageInfoCompat.getLongVersionCode(it) }
+            val installedInfo = if (onlyIfNeeded && archiveInfo != null) {
+                getInstalledPackageInfo(realPackageId)
+            } else {
+                null
+            }
+            if (installedInfo != null && installedCerts.isNotEmpty() && matchesInstalledBuild(
+                    installedInfo.versionName,
+                    PackageInfoCompat.getLongVersionCode(installedInfo),
+                    archiveInfo?.versionName,
+                    archiveVersionCode
+                )
+            ) {
+                mutex.withLock {
+                    val next = _apps.value.map { item ->
+                        if (item == currentApp) {
+                            item.copy(
+                                id = realPackageId,
+                                installedVersion = ObtainmondNative.safeNormalizeVersion(
+                                    installedInfo.versionName.orEmpty(), item.versionExtractionRegex
+                                ),
+                                installedReleaseTag = item.latestVersion,
+                                installedApkUrl = item.matchedApkUrl,
+                                installedReleaseVersionCode = archiveVersionCode,
+                                pinnedSigningCertSha256 = item.pinnedSigningCertSha256
+                                    .ifBlank { firstSigResult.primaryFingerprint }
+                            )
+                        } else {
+                            item
+                        }
+                    }
+                    _apps.value = next
+                    saveAppsToDisk(next)
+                }
+                return@withContext false
+            }
+
             val secrets = if (::secretStore.isInitialized) secretStore.load() else StoredSecrets()
             val scResult = SupplyChainVerifier.withOkHttp(httpClient).verify(
                 app = currentApp,
@@ -1346,21 +1385,8 @@ object AppRepository {
                 return@withContext false
             }
             val reportedSuccess = installOutcome.isInstallSuccess
-            val archiveVersionCode = archiveInfo?.let { PackageInfoCompat.getLongVersionCode(it) }
-            val installedVersionMatches = if (reportedSuccess && archiveVersionCode != null) {
-                runCatching {
-                    val packageManager = appContext.packageManager
-                    val installed = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                        packageManager.getPackageInfo(realPackageId, PackageManager.PackageInfoFlags.of(0))
-                    } else {
-                        @Suppress("DEPRECATION")
-                        packageManager.getPackageInfo(realPackageId, 0)
-                    }
-                    PackageInfoCompat.getLongVersionCode(installed) == archiveVersionCode
-                }.getOrDefault(false)
-            } else {
-                false
-            }
+            val installedVersionMatches = reportedSuccess && archiveVersionCode != null &&
+                getInstalledPackageInfo(realPackageId)?.let { PackageInfoCompat.getLongVersionCode(it) } == archiveVersionCode
             val succeeded = reportedSuccess && installedVersionMatches
             val installDetails = if (reportedSuccess && !installedVersionMatches) {
                 appContext.getString(R.string.package_install_version_unconfirmed)

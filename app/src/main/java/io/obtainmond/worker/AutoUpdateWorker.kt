@@ -21,6 +21,7 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import io.obtainmond.data.repo.AppRepository
 import io.obtainmond.privilege.PrivilegeManager
+import kotlinx.coroutines.CancellationException
 import java.util.concurrent.TimeUnit
 
 class AutoUpdateWorker(
@@ -78,13 +79,15 @@ class AutoUpdateWorker(
             return Result.retry()
         }
 
-        return runCatching {
+        return try {
             AppRepository.refreshAllAndAutoUpdate(
                 autoInstallUpdates = true,
                 isBackgroundWorker = true
             )
             Result.success()
-        }.getOrElse {
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
             Result.retry()
         }
     }
