@@ -40,7 +40,7 @@
     <string name="label_supply_chain">Supply-Chain Verification</string>
     <string name="label_reproducible_builds">Reproducible Builds (F-Droid / Izzy)</string>
     <string name="label_github_attestation">GitHub Provenance Attestations</string>
-    <string name="desc_github_attestation">Looks up attestations by APK hash. Cryptographic verification is unavailable, so Enforce blocks GitHub installs.</string>
+    <string name="desc_github_attestation">Looks up GitHub attestations. Strict enforcement is unavailable until cryptographic verification is supported.</string>
     <string name="label_virustotal_check">VirusTotal Hash Check</string>
     <string name="label_folder_rules">Auto-Folder Rules</string>
     <string name="label_rollback_vault">Rollback Vault</string>
@@ -73,4 +73,5 @@
         <item quantity="one">%d update ready</item>
         <item quantity="other">%d updates ready</item>
     </plurals>
+    <string name="source_added_check_failed">Added %1$s. Release check failed: %2$s</string>
 </resources>

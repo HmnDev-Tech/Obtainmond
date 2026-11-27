@@ -61,7 +61,7 @@ if (hasSigningConfig) {
     android.signingConfigs.sign.enableV1Signing = true
     android.signingConfigs.sign.enableV2Signing = true
     android.signingConfigs.sign.enableV3Signing = true
-    android.buildTypes.debug.signingConfig = android.signingConfigs.sign
+    android.buildTypes.debug.signingConfig = android.signingConfigs.debug
     android.buildTypes.release.signingConfig = android.signingConfigs.sign
 } else {
     android.buildTypes.debug.signingConfig = android.signingConfigs.debug

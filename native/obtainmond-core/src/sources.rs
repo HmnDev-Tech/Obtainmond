@@ -117,14 +117,22 @@ fn extract_fdroid_repo_base_and_pkg(trimmed: &str) -> (String, String) {
 }
 
 pub fn resolve_source_descriptor(raw_url: &str) -> SourceDescriptor {
-    let trimmed = raw_url.trim().trim_end_matches('/');
+    let original = raw_url.trim();
+    let trimmed = original.trim_end_matches('/');
     let lower = trimmed.to_ascii_lowercase();
     let (scheme, host, path) = split_scheme_host(trimmed);
+    let path = path.split(['?', '#']).next().unwrap_or(path);
+    let is_direct_pkg = is_android_package_filename(&path.to_ascii_lowercase());
     let host_lower = host.to_ascii_lowercase();
 
     // 1. GitHub
-    if host_lower == "github.com" || host_lower.ends_with(".github.com") {
-        let parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+    let github_path = match host_lower.as_str() {
+        "github.com" | "www.github.com" => Some(path),
+        "api.github.com" => path.strip_prefix("/repos/"),
+        _ => None,
+    };
+    if let Some(repo_path) = github_path.filter(|_| !is_direct_pkg) {
+        let parts: Vec<&str> = repo_path.split('/').filter(|s| !s.is_empty()).collect();
         let owner = parts.first().copied().unwrap_or("unknown").to_string();
         let repo = parts
             .get(1)
@@ -150,13 +158,17 @@ pub fn resolve_source_descriptor(raw_url: &str) -> SourceDescriptor {
         };
     }
 
+    let is_gitlab = host_lower == "gitlab.com"
+        || host_lower.starts_with("gitlab.")
+        || path.contains("/-/releases");
+
     // 2. Codeberg / Forgejo / Gitea
-    if host_lower == "codeberg.org"
+    if !is_direct_pkg && !is_gitlab && (host_lower == "codeberg.org"
         || host_lower == "forgejo.org"
         || host_lower == "gitea.com"
         || host_lower.starts_with("git.")
         || host_lower.starts_with("gitea.")
-        || host_lower.starts_with("forgejo.")
+        || host_lower.starts_with("forgejo."))
     {
         let parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
         let owner = parts.first().copied().unwrap_or("unknown").to_string();
@@ -191,8 +203,8 @@ pub fn resolve_source_descriptor(raw_url: &str) -> SourceDescriptor {
         };
     }
 
-    // 3. GitLab (gitlab.com and self-hosted gitlab.* instances)
-    if host_lower == "gitlab.com" || host_lower.starts_with("gitlab.") {
+    // 3. GitLab, including self-hosted release pages.
+    if !is_direct_pkg && is_gitlab {
         let clean_path = path
             .trim_start_matches('/')
             .split("/-/")
@@ -424,8 +436,7 @@ pub fn resolve_source_descriptor(raw_url: &str) -> SourceDescriptor {
     }
 
     // 11. Direct APK/Split Bundle or Generic HTML
-    let clean_path_lower = lower.split('?').next().unwrap_or(&lower);
-    let is_direct_pkg = is_android_package_filename(clean_path_lower);
+    let clean_path_lower = path.to_ascii_lowercase();
     let last_seg = clean_path_lower
         .split('/')
         .next_back()
@@ -441,8 +452,8 @@ pub fn resolve_source_descriptor(raw_url: &str) -> SourceDescriptor {
         } else {
             "HTML".to_string()
         },
-        canonical_url: trimmed.to_string(),
-        api_url: trimmed.to_string(),
+        canonical_url: original.to_string(),
+        api_url: original.to_string(),
         owner: "Direct".to_string(),
         repo: last_seg.clone(),
         app_name_hint: last_seg,
@@ -470,7 +481,7 @@ pub fn parse_release_payload(
         "JENKINS" => parse_jenkins_json(payload, fallback_url),
         "DIRECT_APK" => {
             let file_name = fallback_url
-                .split('?')
+                .split(['?', '#'])
                 .next()
                 .unwrap_or(fallback_url)
                 .split('/')
@@ -615,8 +626,9 @@ fn parse_gitlab_releases(
             for link in links {
                 let url = link
                     .get("direct_asset_url")
-                    .or_else(|| link.get("url"))
                     .and_then(|v| v.as_str())
+                    .filter(|url| !url.is_empty())
+                    .or_else(|| link.get("url").and_then(|v| v.as_str()))
                     .unwrap_or("")
                     .to_string();
                 let name = link
@@ -1346,6 +1358,37 @@ fn extract_version_from_url(input: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn github_download_url_tracks_the_selected_asset() {
+        let url = "https://github.com/owner/project/releases/download/v2/app-2.apk?token=test";
+        let source = resolve_source_descriptor(url);
+        assert_eq!(source.source_type, "DIRECT_APK");
+        let release = parse_release_payload(&source.source_type, "", false, url).unwrap();
+        assert_eq!(release.apk_assets[0].name, "app-2.apk");
+        assert_eq!(release.apk_assets[0].url, url);
+    }
+
+    #[test]
+    fn detects_github_api_links_and_self_hosted_gitlab_release_pages() {
+        let github = resolve_source_descriptor("https://api.github.com/repos/owner/project/releases");
+        assert_eq!(github.canonical_url, "https://github.com/owner/project");
+        let gitlab = resolve_source_descriptor(
+            "https://git.example.org/group/subgroup/project/-/releases",
+        );
+        assert_eq!(gitlab.source_type, "GITLAB");
+        assert_eq!(
+            gitlab.api_url,
+            "https://git.example.org/api/v4/projects/group%2Fsubgroup%2Fproject/releases"
+        );
+    }
+
+    #[test]
+    fn gitlab_release_link_falls_back_to_url() {
+        let payload = r#"[{"tag_name":"v2","assets":{"links":[{"name":"app.apk","direct_asset_url":null,"url":"https://example.org/app.apk"}]}}]"#;
+        let release = parse_release_payload("GITLAB", payload, false, "https://gitlab.com/owner/project").unwrap();
+        assert_eq!(release.apk_assets[0].url, "https://example.org/app.apk");
+    }
 
     #[test]
     fn izzyondroid_descriptor_has_no_space_typo_and_parses_json_and_html() {

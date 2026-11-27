@@ -90,7 +90,8 @@ object AppRepository {
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
         .followRedirects(true)
-        .followSslRedirects(true)
+        .followSslRedirects(false)
+        .callTimeout(10, TimeUnit.MINUTES)
         .addNetworkInterceptor { chain ->
             val request = chain.request()
             val url = request.url
@@ -615,12 +616,28 @@ object AppRepository {
         installImmediately: Boolean = true
     ): Result<TrackedApp> = withContext(Dispatchers.IO) {
         runCatching {
-            val desc = ObtainmondNative.resolveSource(rawUrl)
-            val pkgId = customPackageId.trim().ifEmpty { desc.packageIdHint.ifEmpty { desc.repo } }
+            val source = rawUrl.trim().let { if ("://" in it) it else "https://$it" }
+            val sourceUrl = Request.Builder().url(source).build().url
+            require(sourceUrl.isHttps) { "App sources must use HTTPS." }
+            val desc = ObtainmondNative.resolveSource(sourceUrl.toString())
+            val expectedPackageId = customPackageId.trim().ifEmpty {
+                if (desc.sourceType in setOf("FDROID", "FDROID_REPO", "IZZYONDROID", "APTOIDE", "RUSTORE")) {
+                    desc.packageIdHint
+                } else {
+                    ""
+                }
+            }
+            val pkgId = expectedPackageId.ifBlank {
+                val digest = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(desc.canonicalUrl.toByteArray(Charsets.UTF_8))
+                    .take(12).joinToString("") { "%02x".format(it) }
+                "source.tracked.p$digest"
+            }
             val name = customName.trim().ifEmpty { desc.appNameHint.ifEmpty { desc.repo } }
 
             val initial = TrackedApp(
                 id = pkgId,
+                expectedPackageId = expectedPackageId,
                 name = name,
                 author = desc.owner,
                 url = desc.canonicalUrl,
@@ -634,22 +651,31 @@ object AppRepository {
                 categories = if (category.isBlank()) emptyList() else listOf(category.trim())
             )
 
-            val refreshed = fetchLatestReleaseForApp(initial)
+            val refreshed = try {
+                fetchLatestReleaseForApp(initial)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                val (errorCategory, message) = categorizeError(e)
+                initial.copy(errorCategory = errorCategory, lastError = message)
+            }
             mutex.withLock {
-                val filtered = _apps.value.filterNot {
-                    it.id.equals(refreshed.id, ignoreCase = true) ||
-                        it.url.equals(refreshed.url, ignoreCase = true)
+                _apps.value.firstOrNull { it.url == refreshed.url }?.let {
+                    return@runCatching it
                 }
-                val next = listOf(refreshed) + filtered
+                require(_apps.value.none { it.id == refreshed.id }) {
+                    "This package ID is already tracked. Choose a different ID or edit the existing source."
+                }
+                val next = listOf(refreshed) + _apps.value
+                check(saveAppsToDisk(next)) { "Unable to save the application source." }
                 _apps.value = next
-                saveAppsToDisk(next)
             }
             syncInstalledPackagesState()
 
             val latestSnapshot = _apps.value.firstOrNull { it.url == refreshed.url } ?: refreshed
             if (installImmediately && latestSnapshot.matchedApkUrl.isNotBlank() && !latestSnapshot.trackOnly) {
                 if (latestSnapshot.installedVersion.isBlank() || latestSnapshot.hasUpdate) {
-                    downloadAndInstallAppSilently(latestSnapshot.id, onlyIfNeeded = true)
+                    downloadAndInstallAppSilently(latestSnapshot.id, onlyIfNeeded = true, allowFirstInstallPrompt = true)
                 }
             }
             _apps.value.firstOrNull { it.url == refreshed.url } ?: latestSnapshot
@@ -907,58 +933,37 @@ object AppRepository {
             }
         }
 
-        val payload = if (desc.sourceType == "DIRECT_APK") {
-            ""
-        } else {
-            fetchEndpointWithTokenRotation(
-                endpoint = endpoint,
+        fun parseEndpoint(url: String) = ObtainmondNative.parseRelease(
+            sourceType = desc.sourceType,
+            payload = if (desc.sourceType == "DIRECT_APK") "" else fetchEndpointWithTokenRotation(
+                endpoint = url,
                 sourceType = desc.sourceType,
                 githubTokens = secrets.githubTokens,
                 gitlabToken = secrets.gitlabToken,
                 tokenCursor = githubTokenCursor,
                 httpCaller = httpCaller
-            )
-        }
-
-        var parsed = ObtainmondNative.parseRelease(
-            sourceType = desc.sourceType,
-            payload = payload,
+            ),
             includePrereleases = app.includePrereleases,
             fallbackUrl = app.url
-        )
-
-        if (parsed.error != null) {
-            val latestFallbackUrl = resolveGitHubLatestFallbackUrl(
-                desc = desc,
-                usedEndpoint = endpoint,
-                includePrereleases = app.includePrereleases
-            )
-            if (latestFallbackUrl != null) {
-                runCatching {
-                    val latestPayload = fetchEndpointWithTokenRotation(
-                        endpoint = latestFallbackUrl,
-                        sourceType = desc.sourceType,
-                        githubTokens = secrets.githubTokens,
-                        gitlabToken = secrets.gitlabToken,
-                        tokenCursor = githubTokenCursor,
-                        httpCaller = httpCaller
-                    )
-                    ObtainmondNative.parseRelease(
-                        sourceType = desc.sourceType,
-                        payload = latestPayload,
-                        includePrereleases = app.includePrereleases,
-                        fallbackUrl = app.url
-                    )
-                }.getOrNull()?.let { latestParsed ->
-                    if (latestParsed.error == null) {
-                        parsed = latestParsed
-                    }
-                }
-            }
+        ).also { parsed ->
+            parsed.error?.let { throw IllegalStateException(it) }
         }
 
-        if (parsed.error != null) {
-            throw IllegalStateException(parsed.error)
+        val parsed = try {
+            parseEndpoint(endpoint)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (firstError: Exception) {
+            val fallback = resolveGitHubLatestFallbackUrl(desc, endpoint, app.includePrereleases)
+                ?: throw firstError
+            try {
+                parseEndpoint(fallback)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (fallbackError: Exception) {
+                firstError.addSuppressed(fallbackError)
+                throw firstError
+            }
         }
 
         val normalizedRemote = ObtainmondNative.safeNormalizeVersion(
@@ -1011,6 +1016,9 @@ object AppRepository {
         autoInstallUpdates: Boolean = true,
         isBackgroundWorker: Boolean = false
     ): Int = withContext(Dispatchers.IO) {
+        if (isBackgroundWorker && _settings.value.wifiOnlyBackgroundUpdates &&
+            !AutoUpdateWorker.isUnmeteredNetworkAvailable(appContext)
+        ) return@withContext 0
         syncInstalledPackagesState()
 
         if (_settings.value.autoWhitelistBatteryDoze) {
@@ -1051,7 +1059,7 @@ object AppRepository {
                     !app.trackOnly &&
                     !app.needsAttention &&
                     app.matchedApkUrl.isNotBlank() &&
-                    (!isBackgroundWorker || (app.silentAutoUpdate && !app.onDemandOnly))
+                    app.silentAutoUpdate && !app.onDemandOnly
             }
             for (app in candidates) {
                 val ok = downloadAndInstallAppSilently(app.id, isBackground = isBackgroundWorker, onlyIfNeeded = true)
@@ -1098,7 +1106,8 @@ object AppRepository {
         appId: String,
         overrideApkUrl: String? = null,
         isBackground: Boolean = false,
-        onlyIfNeeded: Boolean = false
+        onlyIfNeeded: Boolean = false,
+        allowFirstInstallPrompt: Boolean = !onlyIfNeeded
     ): Boolean = withContext(Dispatchers.IO) {
         val currentApp = _apps.value.firstOrNull { it.id == appId } ?: return@withContext false
         val rawUrlInput = (overrideApkUrl ?: currentApp.matchedApkUrl).trim()
@@ -1118,7 +1127,7 @@ object AppRepository {
         } else {
             rawUrlInput
         }
-        if (!rawDownloadUrl.startsWith("https://") && !rawDownloadUrl.startsWith("http://")) {
+        if (!rawDownloadUrl.startsWith("https://", ignoreCase = true)) {
             return@withContext false
         }
 
@@ -1163,7 +1172,19 @@ object AppRepository {
                 }
                 val body = resp.body
                 targetPackageFile.outputStream().use { out ->
-                    body.byteStream().copyTo(out, bufferSize = 64 * 1024)
+                    val limit = 3L * 1024L * 1024L * 1024L
+                    require(body.contentLength() <= limit) { "Package exceeds download size limit." }
+                    val buffer = ByteArray(64 * 1024)
+                    var downloaded = 0L
+                    body.byteStream().use { input ->
+                        while (true) {
+                            val read = input.read(buffer)
+                            if (read < 0) break
+                            downloaded += read
+                            require(downloaded <= limit) { "Package exceeds download size limit." }
+                            out.write(buffer, 0, read)
+                        }
+                    }
                 }
             }
 
@@ -1262,15 +1283,26 @@ object AppRepository {
                 }
             }.getOrNull()
 
-            val realPackageId = archiveInfo?.packageName?.takeIf { it.isNotBlank() } ?: currentApp.id
-            if (realPackageId != currentApp.id &&
-                ApkSignatureVerifier.getInstalledPackageCertSha256s(appContext, currentApp.id).isNotEmpty()
+            val realPackageId = requireNotNull(archiveInfo?.packageName?.takeIf { it.isNotBlank() }) {
+                "Unable to identify the APK package."
+            }
+            if ((currentApp.expectedPackageId.isNotBlank() && realPackageId != currentApp.expectedPackageId) ||
+                (realPackageId != currentApp.id && (currentApp.pinnedSigningCertSha256.isNotBlank() ||
+                    getInstalledPackageInfo(currentApp.id) != null || _apps.value.any { it.id == realPackageId }))
             ) {
-                val reason = appContext.getString(R.string.package_id_mismatch, currentApp.id, realPackageId)
+                val expectedId = currentApp.expectedPackageId.ifBlank { currentApp.id }
+                val reason = appContext.getString(R.string.package_id_mismatch, expectedId, realPackageId)
                 markAppError(currentApp.id, "INTEGRITY_FAILED", reason)
                 return@withContext false
             }
             val installedCerts = ApkSignatureVerifier.getInstalledPackageCertSha256s(appContext, realPackageId)
+            val unpinnedFirstInstall = installedCerts.isEmpty() && currentApp.pinnedSigningCertSha256.isBlank()
+            if (unpinnedFirstInstall && (!allowFirstInstallPrompt || isBackground)) {
+                return@withContext false
+            }
+            if (obbFiles.isNotEmpty()) {
+                error("This bundle contains OBB files without authenticated integrity metadata.")
+            }
             val mustVerifyCryptoSig = enforceStrictGuard || installedCerts.isNotEmpty() || currentApp.pinnedSigningCertSha256.isNotBlank()
             if (mustVerifyCryptoSig) {
                 val certError = ApkSignatureVerifier.validateUpdateCertificates(
@@ -1376,8 +1408,7 @@ object AppRepository {
                 targetPackageId = realPackageId,
                 settings = currentSettings,
                 allowDowngrade = currentApp.allowDowngrade,
-                obbFiles = obbFiles,
-                externalSourceFile = if (isSplitBundle) targetPackageFile else null
+                requireUserConfirmation = unpinnedFirstInstall
             )
 
             if (installOutcome.installPending) {
@@ -1683,10 +1714,21 @@ object AppRepository {
 
         if (importedApps.isNotEmpty()) {
             mutex.withLock {
-                val existingUrls = _apps.value.map { it.url.lowercase() }.toSet()
-                val merged = _apps.value + importedApps.filterNot { it.url.lowercase() in existingUrls }
+                val urls = _apps.value.map { it.url }.toMutableSet()
+                val ids = _apps.value.map { it.id }.toMutableSet()
+                val additions = importedApps.filter { app ->
+                    if (app.id in ids || app.url in urls) false
+                    else {
+                        ids.add(app.id)
+                        urls.add(app.url)
+                        true
+                    }
+                }
+                val merged = _apps.value + additions
+                check(saveAppsToDisk(merged)) { "Unable to save imported sources." }
                 _apps.value = merged
-                saveAppsToDisk(merged)
+                importedApps.clear()
+                importedApps.addAll(additions)
             }
             syncInstalledPackagesState()
         }

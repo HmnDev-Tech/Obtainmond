@@ -1,4 +1,4 @@
-name: APK Build (Unified Key Debug & Release)
+name: APK Build
 
 on:
   push:
@@ -9,11 +9,11 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
-    name: Build Rust Core & Debug/Release APKs (Same Key)
+    name: Build Rust Core & Debug/Release APKs
     runs-on: ubuntu-latest
 
     steps:
@@ -76,7 +76,7 @@ jobs:
             build --release -p obtainmond-core
           ls -lh ../app/src/main/jniLibs/*/libobtainmond_core.so
 
-      - name: Configure Unified Signing Key (Same Key for Debug & Release)
+      - name: Configure Release Signing Key
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 || secrets.SIGNING_KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD || secrets.SIGNING_KEYSTORE_PASSWORD }}
@@ -84,7 +84,7 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD || secrets.SIGNING_KEY_PASSWORD }}
         run: |
           if [ -n "$KEYSTORE_BASE64" ] && [ -n "$KEYSTORE_PASSWORD" ] && [ -n "$KEY_ALIAS" ] && [ -n "$KEY_PASSWORD" ]; then
-            echo "Using configured repository signing keystore for both Debug and Release APKs"
+            echo "Using configured repository signing keystore for Release APKs"
             echo "$KEYSTORE_BASE64" | base64 --decode > keystore.jks
             cat <<EOF > signing.properties
           KEYSTORE_FILE=keystore.jks
@@ -115,7 +115,7 @@ jobs:
             ./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon --stacktrace
           fi
 
-      - name: Verify Identical Signing Certificate Across Debug & Release APKs
+      - name: Verify Separate Debug and Release Signing Certificates
         if: env.HAS_SIGNING_SECRETS == 'true'
         run: |
           APKSIGNER=$(ls -d "$ANDROID_SDK_ROOT"/build-tools/*/apksigner | sort -V | tail -n1)
@@ -142,11 +142,11 @@ jobs:
             echo "Missing certificate SHA-256 digest (debug='$DEBUG_SHA', release='$RELEASE_SHA')"
             exit 1
           fi
-          if [ "$DEBUG_SHA" != "$RELEASE_SHA" ]; then
-            echo "Certificate mismatch between Debug ($DEBUG_SHA) and Release ($RELEASE_SHA)!"
+          if [ "$DEBUG_SHA" = "$RELEASE_SHA" ]; then
+            echo "Debug and Release must use different certificates. Debug ($DEBUG_SHA) and Release ($RELEASE_SHA)!"
             exit 1
           fi
-          echo "Verified shared Debug & Release certificate SHA-256: $RELEASE_SHA"
+          echo "Verified separate Debug and Release signing certificates"
 
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4

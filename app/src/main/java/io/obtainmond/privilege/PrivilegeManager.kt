@@ -547,8 +547,7 @@ object PrivilegeManager {
         targetPackageId: String,
         settings: ObtainmondSettings,
         allowDowngrade: Boolean = false,
-        obbFiles: List<File> = emptyList(),
-        externalSourceFile: File? = null
+        requireUserConfirmation: Boolean = false
     ): ShellExecOutcome = withContext(Dispatchers.IO) {
         val validApks = apkFiles.filter { it.exists() && it.isFile && it.length() >= 22L }
         if (validApks.isEmpty() || validApks.size != apkFiles.size) {
@@ -561,14 +560,24 @@ object PrivilegeManager {
             ""
         }
 
-        if (obbFiles.isNotEmpty() && safeTargetPkg.isNotBlank()) {
-            stageObbEntries(safeTargetPkg, obbFiles, settings)
+        if (requireUserConfirmation) {
+            return@withContext commitStandardPackageInstallerSession(
+                packageInstaller = context.packageManager.packageInstaller,
+                context = context,
+                apkFiles = validApks,
+                targetPackageId = safeTargetPkg,
+                backendLabel = "Android Package Installer",
+                requireUserConfirmation = true
+            ) ?: ShellExecOutcome(-1, "", "Unable to request installation confirmation", "Package Installer")
         }
 
         if (settings.privilegeMode == PrivilegeBackendMode.EXTERNAL) {
+            if (validApks.size != 1) {
+                return@withContext ShellExecOutcome(-1, "", "Use the Android installer or a privileged backend for split APKs", "External Installer")
+            }
             return@withContext launchExternalInstaller(
                 context = context,
-                fileToShare = externalSourceFile?.takeIf { it.exists() } ?: validApks.first(),
+                fileToShare = validApks.single(),
                 installerPackage = settings.externalInstallerPackage
             )
         }
@@ -773,22 +782,6 @@ object PrivilegeManager {
         return lastOutcome
     }
 
-    private suspend fun stageObbEntries(
-        safePackageId: String,
-        obbFiles: List<File>,
-        settings: ObtainmondSettings
-    ) {
-        val dstDir = "/sdcard/Android/obb/$safePackageId"
-        val script = buildString {
-            append("mkdir -p ${shellQuote(dstDir)}")
-            obbFiles.forEach { file ->
-                val safeName = file.name.replace(Regex("[^a-zA-Z0-9._-]"), "_")
-                append(" && cp ${shellQuote(file.absolutePath)} ${shellQuote("$dstDir/$safeName")}")
-            }
-        }
-        execPrivilegedShell(script, settings.privilegeMode, timeoutMs = 60_000L)
-    }
-
     private suspend fun tryDhizukuPackageInstallerSession(
         context: Context,
         apkFiles: List<File>,
@@ -843,7 +836,8 @@ object PrivilegeManager {
         context: Context,
         apkFiles: List<File>,
         targetPackageId: String,
-        backendLabel: String
+        backendLabel: String,
+        requireUserConfirmation: Boolean = false
     ): ShellExecOutcome? {
         var sessionId: Int? = null
         var committed = false
@@ -856,7 +850,10 @@ object PrivilegeManager {
                     setAppPackageName(targetPackageId)
                 }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
+                    setRequireUserAction(
+                        if (requireUserConfirmation) PackageInstaller.SessionParams.USER_ACTION_REQUIRED
+                        else PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED
+                    )
                 }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     setPackageSource(PackageInstaller.PACKAGE_SOURCE_STORE)

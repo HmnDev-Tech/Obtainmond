@@ -1226,6 +1226,7 @@ private fun SecurityVerificationSubPage(
                 title = stringResource(R.string.label_github_attestation),
                 subtitle = stringResource(R.string.desc_github_attestation),
                 selected = settings.githubAttestationPolicy,
+                enforceAvailable = false,
                 onSelect = { pol -> AppRepository.updateSettings { it.copy(githubAttestationPolicy = pol) } }
             )
         }
@@ -1284,6 +1285,7 @@ private fun VerificationPolicySelectorCard(
     title: String,
     subtitle: String,
     selected: VerificationPolicy,
+    enforceAvailable: Boolean = true,
     onSelect: (VerificationPolicy) -> Unit
 ) {
     Surface(
@@ -1303,6 +1305,7 @@ private fun VerificationPolicySelectorCard(
                 VerificationPolicy.entries.forEach { policy ->
                     FilledTonalToggleButton(
                         checked = selected == policy,
+                        enabled = enforceAvailable || policy != VerificationPolicy.ENFORCE,
                         onCheckedChange = { onSelect(policy) }
                     ) {
                         Text(policy.title)

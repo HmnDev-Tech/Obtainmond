@@ -75,7 +75,7 @@ class AutoUpdateWorker(
             return Result.success()
         }
 
-        if (settings.wifiOnlyBackgroundUpdates && !isUnmeteredNetworkAvailable()) {
+        if (settings.wifiOnlyBackgroundUpdates && !isUnmeteredNetworkAvailable(applicationContext)) {
             return Result.retry()
         }
 
@@ -92,16 +92,14 @@ class AutoUpdateWorker(
         }
     }
 
-    private fun isUnmeteredNetworkAvailable(): Boolean {
-        val cm = applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
-            ?: return false
-        val network = cm.activeNetwork ?: return false
-        val caps = cm.getNetworkCapabilities(network) ?: return false
-        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
-            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
-    }
-
     companion object {
+        internal fun isUnmeteredNetworkAvailable(context: Context): Boolean {
+            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return false
+            val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
+            return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+        }
+
         private const val PERIODIC_WORK_NAME = "obtainmond_zero_touch_periodic_updater"
         private const val IMMEDIATE_WORK_NAME = "obtainmond_zero_touch_immediate_updater"
 

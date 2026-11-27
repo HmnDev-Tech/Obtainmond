@@ -122,7 +122,9 @@ fun AddAppScreen(
     var isSubmitting by remember { mutableStateOf(false) }
 
     val resolvedPreview = remember(urlInput) {
-        if (urlInput.isBlank()) null else ObtainmondNative.resolveSource(urlInput)
+        if (urlInput.isBlank()) null else ObtainmondNative.resolveSource(
+            urlInput.trim().let { if ("://" in it) it else "https://$it" }
+        )
     }
 
     LazyColumn(
@@ -419,8 +421,12 @@ fun AddAppScreen(
                                 result.onSuccess { added ->
                                     Toast.makeText(
                                         context,
-                                        "Added ${added.name} (${added.matchedApkName.ifBlank { added.latestVersion }})",
-                                        Toast.LENGTH_SHORT
+                                        if (added.lastError.isNotBlank()) {
+                                            context.getString(R.string.source_added_check_failed, added.name, added.lastError)
+                                        } else {
+                                            "Added ${added.name} (${added.matchedApkName.ifBlank { added.latestVersion }})"
+                                        },
+                                        if (added.lastError.isNotBlank()) Toast.LENGTH_LONG else Toast.LENGTH_SHORT
                                     ).show()
                                     urlInput = ""
                                     customName = ""

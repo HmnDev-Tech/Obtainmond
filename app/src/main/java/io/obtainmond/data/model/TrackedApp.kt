@@ -88,7 +88,8 @@ data class TrackedApp(
     val lastError: String = "",
     val errorCategory: String = "",
     val lastSupplyChainSummary: String = "",
-    val installedReleaseVersionCode: Long? = null
+    val installedReleaseVersionCode: Long? = null,
+    val expectedPackageId: String = ""
 ) {
     val needsAttention: Boolean
         get() = errorCategory.isNotBlank() || lastError.isNotBlank()

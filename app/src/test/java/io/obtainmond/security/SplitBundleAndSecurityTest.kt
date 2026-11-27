@@ -114,6 +114,18 @@ class SplitBundleAndSecurityTest {
     }
 
     @Test
+    fun verifiedRotationAcceptsAnAuthorizedPastSigner() {
+        val result = ApkSignatureVerificationResult(
+            isVerified = true,
+            signerCertSha256s = listOf("new"),
+            authorizedPastSigners = setOf("old")
+        )
+        assertNull(ApkSignatureVerifier.validateUpdateCertificates(result, listOf("old"), "old"))
+        assertNotNull(ApkSignatureVerifier.validateUpdateCertificates(result, listOf("other"), "old"))
+        assertNotNull(ApkSignatureVerifier.validateUpdateCertificates(result, listOf("old"), "other"))
+    }
+
+    @Test
     fun validateUpdateCertificatesChecksPinAndInstalledCerts() {
         val validSig = ApkSignatureVerificationResult(
             isVerified = true,

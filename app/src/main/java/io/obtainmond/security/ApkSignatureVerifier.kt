@@ -14,7 +14,8 @@ data class ApkSignatureVerificationResult(
     val signerCertSha256s: List<String> = emptyList(),
     val verifiedSchemes: List<String> = emptyList(),
     val primaryFingerprint: String = "",
-    val error: String? = null
+    val error: String? = null,
+    val authorizedPastSigners: Set<String> = emptySet()
 )
 
 object ApkSignatureVerifier {
@@ -54,11 +55,23 @@ object ApkSignatureVerifier {
                     error = issue
                 )
             } else {
+                val lineage = result.signingCertificateLineage
+                val pastSigners = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && certs.size == 1 &&
+                    lineage?.certificatesInLineage?.lastOrNull()?.let(::sha256Hex) == certs.single()
+                ) {
+                    val verifiedLineage = requireNotNull(lineage)
+                    verifiedLineage.certificatesInLineage.dropLast(1)
+                        .filter { verifiedLineage.getSignerCapabilities(it).hasInstalledData() }
+                        .map(::sha256Hex).toSet()
+                } else {
+                    emptySet()
+                }
                 ApkSignatureVerificationResult(
                     isVerified = true,
                     signerCertSha256s = certs,
                     verifiedSchemes = schemes,
-                    primaryFingerprint = certs.first()
+                    primaryFingerprint = certs.first(),
+                    authorizedPastSigners = pastSigners
                 )
             }
         } catch (t: Throwable) {
@@ -114,13 +127,15 @@ object ApkSignatureVerifier {
 
         if (installedCertSha256s.isNotEmpty()) {
             val installedSet = installedCertSha256s.map { it.lowercase() }.toSet()
-            if (apkSet != installedSet) {
+            val rotated = installedSet.size == 1 && apkSet.size == 1 &&
+                installedSet.single() in verification.authorizedPastSigners
+            if (apkSet != installedSet && !rotated) {
                 return "Signing certificate mismatch with installed app (installed=${installedSet.first().take(12)}..., downloaded=${apkSet.first().take(12)}...)"
             }
         }
 
         val normalizedPin = pinnedCertSha256.trim().lowercase()
-        if (normalizedPin.isNotEmpty() && normalizedPin !in apkSet) {
+        if (normalizedPin.isNotEmpty() && normalizedPin !in apkSet && normalizedPin !in verification.authorizedPastSigners) {
             return "Signing certificate mismatch with pinned fingerprint (pinned=${normalizedPin.take(12)}..., downloaded=${apkSet.first().take(12)}...)"
         }
 
